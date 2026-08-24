@@ -1,1 +1,10 @@
+## Latihan MPDW
+
+Dalam hal ini akan dibuat variabel x yang bernilai 3
+
+
+```{r}
+x = 3
+x
+```
 
