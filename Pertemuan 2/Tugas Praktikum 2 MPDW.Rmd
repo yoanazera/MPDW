@@ -1,0 +1,323 @@
+---
+title: "Tugas Praktikum 2 MPDW"
+author: "Yoan Puti Nazera"
+date: "2026-09-02"
+output: rmdformats::readthedown
+---
+
+```{r}
+library(dplyr)
+library(lmtest) 
+library(orcutt)   
+library(HoRM)
+```
+
+```{r}
+# Fungsi Hildreth-Lu (sama seperti pada praktikum)
+hildreth.lu.func <- function(r, model){
+  x <- model.matrix(model)[,-1]
+  y <- model.response(model.frame(model))
+  n <- length(y)
+  t <- 2:n
+  y <- y[t] - r*y[t-1]
+  x <- x[t] - r*x[t-1]
+  return(lm(y ~ x))
+}
+```
+
+# SOAL 1
+## Input Data
+```{r}
+period <- 1:20
+market_share <- c(3.63, 4.20, 3.33, 4.54, 2.89, 4.87, 4.90, 5.29, 6.18, 7.20,
+                  7.25, 6.09, 6.80, 8.65, 8.43, 8.29, 7.18, 7.90, 8.45, 8.23)
+price <- c(0.97, 0.95, 0.99, 0.91, 0.98, 0.90, 0.89, 0.86, 0.85, 0.82,
+           0.79, 0.83, 0.81, 0.77, 0.76, 0.80, 0.83, 0.79, 0.76, 0.78)
+data1 <- data.frame(period, market_share, price)
+data1
+```
+## EKsplorasi Data
+### Plot Deret Waktu
+```{r}
+data1.ts <- ts(data1$market_share)
+ts.plot(data1.ts, xlab = "Period", ylab = "Market Share",
+        main = "Time Series Plot of Market Share")
+points(data1.ts)
+```
+
+### Scatter Plot dan Korelasi
+```{r}
+plot(price, market_share, pch = 20, col = "blue",
+     main = "Scatter Plot Price vs Market Share",
+     xlab = "Price", ylab = "Market Share")
+cor(price, market_share)
+```
+## Model Regresi (OLS)
+```{r}
+model1 <- lm(market_share ~ price, data = data1)
+summary(model1)
+```
+$$\hat{Y}_t = 26.9099 - 24.2898\,X_t$$
+## Diagnostik Sisaan
+```{r}
+sisaan1  <- residuals(model1)
+fitValue1 <- predict(model1)
+
+par(mfrow = c(2,2))
+qqnorm(sisaan1); qqline(sisaan1, col = "steelblue", lwd = 2)
+plot(fitValue1, sisaan1, col = "steelblue", pch = 20,
+     xlab = "Fitted Values", ylab = "Sisaan", main = "Sisaan vs Fitted Values")
+abline(a = 0, b = 0, lwd = 2)
+hist(sisaan1, col = "steelblue")
+plot(seq(1, 20, 1), sisaan1, col = "steelblue", pch = 20,
+     xlab = "Order", ylab = "Sisaan", main = "Sisaan vs Order")
+lines(seq(1, 20, 1), sisaan1, col = "red")
+abline(a = 0, b = 0, lwd = 2)
+par(mfrow = c(1,1))
+```
+### uji formal normalitas sisaan
+```{r}
+shapiro.test(sisaan1)
+ks.test(sisaan1, "pnorm", mean = mean(sisaan1), sd = sd(sisaan1))
+```
+
+### identifikasi autokorelasi lewat ACF dan PACF
+```{r}
+par(mfrow = c(1,2))
+acf(sisaan1)
+pacf(sisaan1)
+par(mfrow = c(1,1))
+```
+**H0: tidak ada autokorelasi** 
+**H1: ada autokorelasi positif**
+```{r}
+dwtest(model1)
+```
+
+> DW = 1.1358. Tabel DW (n = 20, k = 1, alpha = 5%): dL = 1.2015, dU = 1.4107.
+> Karena DW < dL, tolak H0 -> terdapat autokorelasi positif pada sisaan.
+
+## Penanganan
+### Cochrane-Orcutt
+```{r}
+modelCO1 <- cochrane.orcutt(model1)
+modelCO1
+```
+
+```{r}
+rho1 <- modelCO1$rho
+rho1
+```
+
+```{r}
+# transformasi manual
+share.trans <- market_share[-1] - market_share[-20]*rho1
+price.trans <- price[-1] - price[-20]*rho1
+modelCO1manual <- lm(share.trans ~ price.trans)
+summary(modelCO1manual)
+```
+
+```{r}
+# transformasi balik ke skala awal: b0 = b0*/(1-rho), b1 = b1*
+b0bintang1 <- modelCO1manual$coefficients[1]
+b0_CO1 <- b0bintang1/(1 - rho1)
+b1_CO1 <- modelCO1manual$coefficients[2]
+c(b0 = b0_CO1, b1 = b1_CO1)
+
+dwtest(modelCO1manual)
+```
+
+### Hildreth-Lu
+
+```{r}
+# pencarian rho yang meminimumkan SSE (grid kasar)
+r <- seq(0.1, 0.9, by = 0.1)
+tab1 <- data.frame(rho = r,
+                   SSE = sapply(r, function(i) deviance(hildreth.lu.func(i, model1))))
+round(tab1, 4)
+```
+
+```{r}
+# grid halus di sekitar 0.4
+rOpt1 <- seq(0.3, 0.55, by = 0.001)
+tabOpt1 <- data.frame(rho = rOpt1,
+                      SSE = sapply(rOpt1, function(i) deviance(hildreth.lu.func(i, model1))))
+head(tabOpt1[order(tabOpt1$SSE), ])
+
+plot(tab1$SSE ~ tab1$rho, type = "l", xlab = "Rho", ylab = "SSE")
+abline(v = tabOpt1[tabOpt1$SSE == min(tabOpt1$SSE), "rho"], lty = 2, col = "red", lwd = 2)
+text(x = 0.425, y = min(tabOpt1$SSE), labels = "rho=0.425", cex = 0.8)
+```
+
+```{r}
+modelHL1 <- hildreth.lu.func(0.425, model1)
+summary(modelHL1)
+
+# transformasi balik
+cat("y = ", coef(modelHL1)[1]/(1 - 0.425), " + ", coef(modelHL1)[2], "x", sep = "")
+
+dwtest(modelHL1)
+```
+## Perbandingan Model Data 1
+
+```{r}
+sseAwal1 <- anova(model1)$`Sum Sq`[-1]
+sseCO1   <- anova(modelCO1manual)$`Sum Sq`[-1]
+sseHL1   <- anova(modelHL1)$`Sum Sq`[-1]
+akurasi1 <- matrix(c(sseAwal1, sseCO1, sseHL1,
+                     sseAwal1/20, sseCO1/20, sseHL1/20),
+                   nrow = 2, ncol = 3, byrow = TRUE)
+colnames(akurasi1) <- c("Model Awal", "Cochrane-Orcutt", "Hildreth-Lu")
+rownames(akurasi1) <- c("SSE", "MSE")
+akurasi1
+```
+
+# Soal 2
+## Input Data
+
+```{r}
+year <- 1975:2014
+sales <- c(11.7,12.0,12.3,12.8,13.1,13.6,13.9,14.4,14.7,15.3,
+           15.5,15.8,16.1,16.6,16.9,16.7,16.9,17.4,17.6,17.9,
+           18.0,17.9,18.0,18.2,18.2,18.3,18.6,19.2,19.3,19.5,
+           19.2,19.3,19.5,20.0,20.0,19.9,19.8,19.9,20.2,21.0)
+advertising <- c(9.4,9.6,10.0,10.4,10.8,10.9,11.7,12.2,12.5,12.9,
+                 13.0,13.2,13.8,14.2,14.6,14.4,15.0,15.4,15.7,15.9,
+                 15.9,16.0,16.3,16.2,16.8,17.3,17.6,18.1,18.3,18.5,
+                 18.7,18.9,19.2,20.0,20.0,20.3,20.4,21.0,21.5,22.1)
+data2 <- data.frame(year, sales, advertising)
+head(data2, 10)
+```
+
+## Eksplorasi Data
+
+```{r}
+data2.ts <- ts(data2$sales, start = 1975)
+ts.plot(data2.ts, xlab = "Year", ylab = "Sales", main = "Time Series Plot of Sales")
+points(data2.ts)
+
+plot(advertising, sales, pch = 20, col = "blue",
+     main = "Scatter Plot Advertising vs Sales",
+     xlab = "Advertising", ylab = "Sales")
+cor(advertising, sales)
+```
+
+## Model Regresi (OLS)
+
+```{r}
+model2 <- lm(sales ~ advertising, data = data2)
+summary(model2)
+```
+
+$$\hat{Y}_t = 5.9651 + 0.7103\,X_t$$
+
+## Diagnostik Sisaan
+
+```{r}
+sisaan2   <- residuals(model2)
+fitValue2 <- predict(model2)
+
+par(mfrow = c(2,2))
+qqnorm(sisaan2); qqline(sisaan2, col = "steelblue", lwd = 2)
+plot(fitValue2, sisaan2, col = "steelblue", pch = 20,
+     xlab = "Fitted Values", ylab = "Sisaan", main = "Sisaan vs Fitted Values")
+abline(a = 0, b = 0, lwd = 2)
+hist(sisaan2, col = "steelblue")
+plot(seq(1, 40, 1), sisaan2, col = "steelblue", pch = 20,
+     xlab = "Order", ylab = "Sisaan", main = "Sisaan vs Order")
+lines(seq(1, 40, 1), sisaan2, col = "red")
+abline(a = 0, b = 0, lwd = 2)
+par(mfrow = c(1,1))
+```
+
+```{r}
+shapiro.test(sisaan2)
+ks.test(sisaan2, "pnorm", mean = mean(sisaan2), sd = sd(sisaan2))
+```
+
+```{r}
+par(mfrow = c(1,2))
+acf(sisaan2)
+pacf(sisaan2)
+par(mfrow = c(1,1))
+
+dwtest(model2)
+```
+
+> DW = 0.1620. Tabel DW (n = 40, k = 1, alpha = 5%): dL = 1.4421, dU = 1.5440.
+> DW jauh di bawah dL -> autokorelasi positif yang sangat kuat.
+
+## Penanganan
+### Cochrane-Orcutt
+
+```{r}
+modelCO2 <- cochrane.orcutt(model2)
+modelCO2
+
+rho2 <- modelCO2$rho
+rho2
+```
+
+```{r}
+# transformasi manual
+sales.trans <- sales[-1] - sales[-40]*rho2
+adv.trans   <- advertising[-1] - advertising[-40]*rho2
+modelCO2manual <- lm(sales.trans ~ adv.trans)
+summary(modelCO2manual)
+
+b0_CO2 <- modelCO2manual$coefficients[1]/(1 - rho2)
+b1_CO2 <- modelCO2manual$coefficients[2]
+c(b0 = b0_CO2, b1 = b1_CO2)
+
+dwtest(modelCO2manual)
+```
+
+### Hildreth-Lu
+
+```{r}
+r <- seq(0.1, 0.9, by = 0.1)
+tab2 <- data.frame(rho = r,
+                   SSE = sapply(r, function(i) deviance(hildreth.lu.func(i, model2))))
+round(tab2, 4)
+```
+
+```{r}
+rOpt2 <- seq(0.8, 0.99, by = 0.001)
+tabOpt2 <- data.frame(rho = rOpt2,
+                      SSE = sapply(rOpt2, function(i) deviance(hildreth.lu.func(i, model2))))
+head(tabOpt2[order(tabOpt2$SSE), ])
+
+plot(tabOpt2$SSE ~ tabOpt2$rho, type = "l", xlab = "Rho", ylab = "SSE")
+abline(v = tabOpt2[tabOpt2$SSE == min(tabOpt2$SSE), "rho"], lty = 2, col = "red", lwd = 2)
+text(x = 0.903, y = min(tabOpt2$SSE), labels = "rho=0.903", cex = 0.8)
+```
+
+```{r}
+modelHL2 <- hildreth.lu.func(0.903, model2)
+summary(modelHL2)
+
+cat("y = ", coef(modelHL2)[1]/(1 - 0.903), " + ", coef(modelHL2)[2], "x", sep = "")
+
+dwtest(modelHL2)
+```
+
+## Perbandingan Model Data 2
+
+```{r}
+sseAwal2 <- anova(model2)$`Sum Sq`[-1]
+sseCO2   <- anova(modelCO2manual)$`Sum Sq`[-1]
+sseHL2   <- anova(modelHL2)$`Sum Sq`[-1]
+akurasi2 <- matrix(c(sseAwal2, sseCO2, sseHL2,
+                     sseAwal2/40, sseCO2/40, sseHL2/40),
+                   nrow = 2, ncol = 3, byrow = TRUE)
+colnames(akurasi2) <- c("Model Awal", "Cochrane-Orcutt", "Hildreth-Lu")
+rownames(akurasi2) <- c("SSE", "MSE")
+akurasi2
+```
+
+
+# Simpulan
+
+1. **Data 1 (Market share ~ Price).** Model OLS awal: Y = 26.9099 - 24.2898 X, R-sq = 95.11%, tetapi DW = 1.1358 < dL = 1.2015 sehingga terdapat autokorelasi positif pada sisaan. Penanganan Cochrane-Orcutt (rho = 0.4252) menghasilkan Y = 26.7221 - 24.0841 X dan Hildreth-Lu (rho = 0.425) menghasilkan Y = 26.7227 - 24.0848 X. DW naik menjadi ~1.96 (berada pada dU < DW < 4-dU) dan menurunkan SSE dari 3.3083 menjadi 2.6594.
+2. **Data 2 (Sales ~ Advertising).** Model OLS awal: Y = 5.9651 + 0.7103 X, R-sq = 95.96%, namun DW = 0.1620, jauh di bawah dL = 1.4421 -> autokorelasi positif sangat kuat. Cochrane-Orcutt (rho = 0.9031) menghasilkan Y = 10.2524 + 0.4885 X dan Hildreth-Lu (rho = 0.903) menghasilkan Y = 10.2475 + 0.4887 X, dengan DW meningkat menjadi ~1.94 dan SSE turun drastis dari 10.5545 menjadi 1.2912.
+3. Pada kedua data, Cochrane-Orcutt dan Hildreth-Lu berhasil menghilangkan autokorelasi sisaan.
