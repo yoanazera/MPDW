@@ -1,1 +1,665 @@
+---
+title: "Latihan 3 New Delhi Air Quality"
+author: "Yoan Puti Nazera"
+date: "2026-09-03"
+output: rmdformats::readthedown
+editor_options: 
+  markdown: 
+    wrap: 72
+---
 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.align = "center", fig.width = 8, fig.height = 4.5)
+```
+
+Data yang digunakan adalah data **kualitas udara Kota New Delhi** yang
+terdiri atas 72 pengamatan per jam (21 Oktober 2022 pukul 18.00 sampai
+24 Oktober 2022). Peubah yang digunakan:
+
+- **Peubah respon (Y)**: `AQI` (*Air Quality Index*)
+- **Peubah penjelas (X)**: `o3` (konsentrasi ozon)
+
+Peubah `o3` dipilih sebagai peubah penjelas karena memiliki korelasi
+paling kuat terhadap AQI dibandingkan polutan lain (CO, NO2, PM10,
+PM2.5, dan SO2).
+
+Tujuan analisis adalah menerapkan beberapa model regresi dengan peubah
+*lag* (Koyck, *Distributed Lag Model*, dan *Autoregressive Distributed
+Lag*), lalu menentukan model terbaik berdasarkan metrik akurasi.
+
+# Library
+
+```{r}
+library(dLagM)      
+library(dynlm)      
+library(MLmetrics)  
+library(lmtest)     
+library(car)
+```
+
+# Impor Data
+
+```{r}
+data <- rio::import("C:\\Users\\HYPE R Series\\Downloads\\NewDelhi_Air_quality (1).csv")
+
+str(data)
+head(data)
+```
+
+## Pemilihan Peubah Penjelas
+
+```{r}
+polutan <- c("CO", "no2", "o3", "pm10", "pm25", "so2")
+kor <- sapply(data[polutan], function(z) cor(data$AQI, z))
+round(sort(abs(kor), decreasing = TRUE), 4)
+round(kor, 4)
+```
+
+Korelasi tertinggi diperoleh pada peubah `o3` ($r \approx 0{,}9736$),
+sehingga `o3` ditetapkan sebagai peubah penjelas $X$.
+
+## Pembentukan Data Kerja
+
+```{r}
+data <- data.frame(t = 1:nrow(data), Yt = data$AQI, Xt = data$o3)
+str(data)
+summary(data[, c("Yt", "Xt")])
+```
+
+# Eksplorasi Data
+
+```{r}
+par(mfrow = c(1, 2))
+plot(data$t, data$Yt, type = "o", pch = 16, cex = 0.7, col = "steelblue",
+     xlab = "Periode (jam)", ylab = "AQI", main = "Plot Y (AQI)")
+plot(data$t, data$Xt, type = "o", pch = 16, cex = 0.7, col = "tomato",
+     xlab = "Periode (jam)", ylab = "O3", main = "Plot X (Ozon)")
+par(mfrow = c(1, 1))
+```
+
+```{r}
+plot(data$Xt, data$Yt, pch = 16, col = "darkgreen",
+     xlab = "O3 (X)", ylab = "AQI (Y)", main = "Scatterplot Y vs X")
+abline(lm(Yt ~ Xt, data = data), col = "red", lwd = 2)
+
+cor(data$Yt, data$Xt)
+cor.test(data$Yt, data$Xt)
+```
+
+Kedua peubah bergerak dengan pola harian yang mirip. Korelasi antara AQI
+dan konsentrasi ozon bernilai **positif sangat kuat**, yang berarti
+kenaikan konsentrasi ozon diikuti oleh kenaikan indeks kualitas udara.
+Karena data berbentuk deret waktu per jam dan pengaruh polutan terhadap
+AQI dapat bersifat tertunda, pemodelan dengan peubah *lag* menjadi
+relevan.
+
+# Pembagian Data
+
+Data dibagi dengan proporsi 80% data latih dan 20% data uji.
+
+```{r}
+n <- nrow(data)
+n_train <- round(0.8 * n)
+
+train <- data[1:n_train, ]
+test  <- data[(n_train + 1):n, ]
+
+c(n = n, n_train = nrow(train), n_test = nrow(test))
+
+train.ts <- ts(train)
+test.ts  <- ts(test)
+data.ts  <- ts(data)
+```
+
+# Model Koyck
+
+Model Koyck mengasumsikan bahwa pengaruh *lag* peubah penjelas semakin
+kecil seiring bertambahnya jarak *lag* (*geometric lag*), sehingga model
+*infinite distributed lag* dapat diringkas menjadi:
+
+$$Y_t=a(1-\lambda)+\beta_0X_t+\lambda Y_{t-1}+V_t, \qquad V_t=u_t-\lambda u_{t-1}$$
+
+```{r}
+model.koyck <- koyckDlm(x = train$Xt, y = train$Yt)
+summary(model.koyck)
+AIC(model.koyck)
+BIC(model.koyck)
+```
+
+Berdasarkan hasil estimasi model Koyck, diperoleh persamaan:
+
+$\hat{Y}_t = 0.26260 + 0.42943Y_{t-1} + 0.25823X_t$
+
+Koefisien $Y_{t-1}$ sebesar **0.42943** dan $X_t$ sebesar **0.25823**,
+keduanya berpengaruh positif dan signifikan terhadap $Y_t$ dengan
+nilai-p masing-masing sebesar $7.14\times10^{-6}$ dan
+$1.35\times10^{-7}$. Sementara itu, intersep tidak signifikan dengan
+nilai-p sebesar **0.781**.
+
+Nilai $R^2$ sebesar **0.9449** menunjukkan bahwa model mampu menjelaskan
+**94.49%** variasi pada $Y_t$, sedangkan sisanya sebesar 5.51%
+dijelaskan oleh faktor lain di luar model. Hasil Wald test menunjukkan
+nilai-p **\< 2.2 × 10⁻¹⁶**, sehingga model secara keseluruhan
+signifikan.
+
+Berdasarkan geometric coefficients, diperoleh $\alpha=0.460243$,
+$\beta=0.258234$, dan $\phi=0.429431$. Nilai $\phi$ yang positif dan
+kurang dari 1 menunjukkan bahwa pengaruh $X_t$ terhadap $Y_t$ bersifat
+menurun secara geometris pada periode berikutnya.
+
+## Peramalan dan Akurasi
+
+```{r}
+fore.koyck <- forecast(model = model.koyck, x = test$Xt, h = nrow(test))
+fore.koyck$forecasts
+
+mape.koyck <- MAPE(fore.koyck$forecasts, test$Yt)
+mape.koyck        
+GoF(model.koyck)  
+```
+
+Berdasarkan hasil peramalan model Koyck, diperoleh nilai **MAPE sebesar
+0.01494 atau 1.49%**, yang menunjukkan bahwa tingkat kesalahan peramalan
+model tergolong rendah. Nilai **MAE sebesar 0.39765** dan **MSE sebesar
+0.26002** juga menunjukkan bahwa kesalahan peramalan relatif kecil.
+Sementara itu, nilai **MASE sebesar 0.59861 (\<1)** menunjukkan bahwa
+model Koyck memiliki kinerja peramalan yang lebih baik dibandingkan
+metode naif sebagai pembanding.
+
+# Regression with Distributed Lag
+
+## Pemodelan (Lag = 2)
+
+$$\hat{Y_t}=\beta_0+\beta_1X_t+\beta_2X_{t-1}+\beta_3X_{t-2}$$
+
+```{r}
+model.dlm <- dlm(x = train$Xt, y = train$Yt, q = 2)
+summary(model.dlm)
+AIC(model.dlm)
+BIC(model.dlm)
+```
+
+Diperoleh persamaan:
+
+$\hat{Y}_t = -0.17052 + 0.48758X_t - 0.01754X_{t-1} - 0.00590X_{t-2}$
+
+Koefisien $X_t$ sebesar **0.48758** berpengaruh positif dan signifikan
+terhadap $Y_t$ dengan nilai-p $1.13\times10^{-12}$. Sementara itu,
+$X_{t-1}$ dan $X_{t-2}$ tidak berpengaruh signifikan terhadap $Y_t$,
+dengan nilai-p masing-masing sebesar **0.859** dan **0.915**.
+
+Nilai $R^2$ sebesar **0.9763** menunjukkan bahwa model mampu menjelaskan
+**97.63%** variasi $Y_t$, sedangkan sisanya sebesar 2.37% dijelaskan
+oleh faktor lain di luar model. Uji F menghasilkan nilai-p **\< 2.2 ×
+10⁻¹⁶**, sehingga dapat disimpulkan bahwa model secara keseluruhan
+signifikan. Nilai AIC dan BIC masing-masing sebesar **47.0482** dan
+**57.1749**.
+
+## Peramalan dan Akurasi
+
+```{r}
+fore.dlm <- forecast(model = model.dlm, x = test$Xt, h = nrow(test))
+fore.dlm$forecasts
+
+mape.dlm <- MAPE(fore.dlm$forecasts, test$Yt)
+mape.dlm
+GoF(model.dlm)
+```
+
+Berdasarkan hasil peramalan model DLM, diperoleh nilai **MAPE sebesar
+0.00988 atau 0.99%**, yang menunjukkan bahwa tingkat kesalahan peramalan
+model tergolong sangat rendah. Nilai **MAE sebesar 0.26591** dan **MSE
+sebesar 0.11346** menunjukkan bahwa kesalahan peramalan relatif kecil.
+Selain itu, nilai **MASE sebesar 0.41082 (\<1)** menunjukkan bahwa model
+DLM memiliki kinerja peramalan yang lebih baik dibandingkan metode naif
+sebagai pembanding.
+
+## Penentuan Lag Optimum
+
+```{r}
+finiteDLMauto(formula = Yt ~ Xt, data = data.frame(train),
+              q.min = 1, q.max = 12,
+              model.type = "dlm", error.type = "AIC", trace = TRUE)
+```
+
+```{r}
+qauto <- finiteDLMauto(formula = Yt ~ Xt, data = data.frame(train),
+                       q.min = 1, q.max = 12,
+                       model.type = "dlm", error.type = "AIC", trace = FALSE)
+q.opt <- as.numeric(rownames(qauto)[which.min(qauto$AIC)])
+q.opt
+```
+
+Berdasarkan hasil perbandingan model DLM dengan berbagai panjang lag,
+model dengan **q = 10** memiliki nilai **MASE terendah sebesar
+0.33647**, sehingga memberikan kinerja peramalan terbaik berdasarkan
+MASE. Model q = 10 juga memiliki nilai **R.Adj.Sq sebesar 0.98393**,
+yang menunjukkan kemampuan model dalam menjelaskan variasi data relatif
+tinggi. Oleh karena itu, berdasarkan kriteria MASE, model **DLM dengan q
+= 10** dipilih sebagai model terbaik.
+
+## Pemodelan dengan Lag Optimum
+
+```{r}
+model.dlm2 <- dlm(x = train$Xt, y = train$Yt, q = q.opt)
+summary(model.dlm2)
+AIC(model.dlm2)
+BIC(model.dlm2)
+```
+
+Berdasarkan hasil estimasi Distributed Lag Model (DLM) dengan lag hingga
+10 periode, diperoleh persamaan:
+
+$\hat{Y}_t = -0.64267 + 0.42814X_t + 0.13889X_{t-1} - 0.05734X_{t-2} - 0.14994X_{t-3} + 0.15911X_{t-4} - 0.01335X_{t-5} - 0.12709X_{t-6} + 0.27371X_{t-7} - 0.37459X_{t-8} + 0.28924X_{t-9} - 0.09537X_{t-10}$
+
+Koefisien $X_t$ sebesar **0.42814** berpengaruh positif dan signifikan
+terhadap $Y_t$ dengan nilai-p $4.08\times10^{-8}$. Selain itu,
+$X_{t-7}$, $X_{t-8}$, dan $X_{t-9}$ juga berpengaruh signifikan terhadap
+$Y_t$, dengan nilai-p masing-masing **0.03180**, **0.00378**, dan
+**0.00862**. Sementara itu, variabel lag lainnya tidak berpengaruh
+signifikan pada taraf 5%.
+
+Nilai $R^2$ sebesar **0.9877** menunjukkan bahwa model mampu menjelaskan
+**98.77%** variasi $Y_t$, sedangkan sisanya sebesar 1.23% dijelaskan
+oleh faktor lain di luar model. Nilai *Adjusted R-squared* sebesar
+**0.9839** juga menunjukkan bahwa model memiliki kemampuan penjelasan
+yang sangat tinggi. Uji F menghasilkan nilai-p **\< 2.2 × 10⁻¹⁶**,
+sehingga model secara keseluruhan signifikan.
+
+Nilai **AIC sebesar 24.1076** dan **BIC sebesar 48.4332** diperoleh
+sebagai ukuran pembanding dengan model DLM lainnya.
+
+## Peramalan dan Akurasi
+
+```{r}
+fore.dlm2 <- forecast(model = model.dlm2, x = test$Xt, h = nrow(test))
+fore.dlm2$forecasts
+
+mape.dlm2 <- MAPE(fore.dlm2$forecasts, test$Yt)
+mape.dlm2
+GoF(model.dlm2)
+```
+
+Berdasarkan hasil peramalan model DLM dengan lag hingga 10 periode,
+diperoleh nilai **MAPE sebesar 0.00737 atau 0.74%**, yang menunjukkan
+bahwa tingkat kesalahan peramalan model tergolong sangat rendah. Nilai
+**MAE sebesar 0.20045** dan **MSE sebesar 0.05629** menunjukkan bahwa
+kesalahan peramalan relatif kecil. Selain itu, nilai **MASE sebesar
+0.33647 (\<1)** menunjukkan bahwa model DLM memiliki kinerja peramalan
+yang lebih baik dibandingkan metode naif sebagai pembanding.
+
+# Model Autoregressive (ARDL)
+
+Pada model *autoregressive*, $Y_t$ dipengaruhi oleh peubah penjelas saat
+ini dan *lag*-nya, serta oleh *lag* dari dirinya sendiri.
+
+$$\hat{Y_t}=\beta_0+\beta_1X_t+\beta_2X_{t-1}+\gamma Y_{t-1}$$
+
+## Pemodelan (p = 1, q = 1)
+
+```{r}
+model.ardl <- ardlDlm(formula = Yt ~ Xt, data = train, p = 1, q = 1)
+summary(model.ardl)
+AIC(model.ardl)
+BIC(model.ardl)
+```
+
+Berdasarkan hasil estimasi model ARDL(1,1), diperoleh persamaan:
+
+$\hat{Y}_t = -0.24530 + 0.48660X_t - 0.23184X_{t-1} + 0.45632Y_{t-1}$
+
+Koefisien $X_t$ sebesar **0.48660**, $X_{t-1}$ sebesar **-0.23184**, dan
+$Y_{t-1}$ sebesar **0.45632** seluruhnya berpengaruh signifikan terhadap
+$Y_t$, dengan nilai-p masing-masing **\< 2 × 10⁻¹⁶**,
+$4.56\times10^{-6}$, dan $6.51\times10^{-9}$. Sementara itu, intersep
+tidak signifikan dengan nilai-p sebesar **0.714**.
+
+Nilai $R^2$ sebesar **0.9716** menunjukkan bahwa model mampu menjelaskan
+**97.16%** variasi $Y_t$, sedangkan sisanya sebesar 2.84% dijelaskan
+oleh faktor lain di luar model. Nilai *Adjusted R-squared* sebesar
+**0.9700** menunjukkan bahwa model memiliki kemampuan penjelasan yang
+sangat tinggi. Uji F menghasilkan nilai-p **\< 2.2 × 10⁻¹⁶**, sehingga
+model secara keseluruhan signifikan.
+
+Nilai **AIC sebesar 57.2222** dan **BIC sebesar 67.4375** diperoleh
+sebagai ukuran pembanding dengan model lainnya.
+
+## Peramalan dan Akurasi
+
+```{r}
+fore.ardl <- forecast(model = model.ardl, x = test$Xt, h = nrow(test))
+fore.ardl$forecasts
+
+mape.ardl <- MAPE(fore.ardl$forecasts, test$Yt)
+mape.ardl
+GoF(model.ardl)
+```
+
+Berdasarkan hasil peramalan model ARDL, diperoleh nilai **MAPE sebesar
+0.01166 atau 1.17%**, yang menunjukkan bahwa tingkat kesalahan peramalan
+model tergolong rendah. Nilai **MAE sebesar 0.31388** dan **MSE sebesar
+0.13407** menunjukkan bahwa kesalahan peramalan relatif kecil. Selain
+itu, nilai **MASE sebesar 0.47251 (\<1)** menunjukkan bahwa model ARDL
+memiliki kinerja peramalan yang lebih baik dibandingkan metode naif
+sebagai pembanding.
+
+## Penentuan Ordo Optimum
+
+```{r}
+model.ardl.opt <- ardlBoundOrders(data = data.frame(data[, c("Yt", "Xt")]),
+                                  ic = "AIC", formula = Yt ~ Xt)
+model.ardl.opt$Stat.table[1:6]
+model.ardl.opt$min.Stat
+```
+
+```{r}
+min_p <- c()
+for (i in seq_along(model.ardl.opt$Stat.table)) {
+  min_p[i] <- suppressWarnings(min(model.ardl.opt$Stat.table[[i]], na.rm = TRUE))
+}
+q_opt <- which(min_p == min(min_p, na.rm = TRUE))[1]
+p_opt <- which(model.ardl.opt$Stat.table[[q_opt]] ==
+                 min(model.ardl.opt$Stat.table[[q_opt]], na.rm = TRUE))[1]
+
+data.frame("p_optimum" = p_opt, "q_optimum" = q_opt,
+           "AIC" = model.ardl.opt$min.Stat)
+```
+
+Berdasarkan hasil pemilihan orde optimum menggunakan kriteria **AIC**,
+diperoleh model **ARDL(2,13)** sebagai model terbaik dengan nilai AIC
+sebesar **16.55044**. Dengan demikian, model ARDL dengan **p = 2** dan
+**q = 13** dipilih sebagai model optimum karena memiliki nilai AIC
+terkecil.
+
+## Pemodelan dengan Ordo Optimum
+
+```{r}
+model.ardl.op <- ardlDlm(formula = Yt ~ Xt, data = train, p = p_opt, q = q_opt)
+summary(model.ardl.op)
+AIC(model.ardl.op)
+BIC(model.ardl.op)
+
+fore.ardl.op <- forecast(model = model.ardl.op, x = test$Xt, h = nrow(test))
+mape.ardl.op <- MAPE(fore.ardl.op$forecasts, test$Yt)
+mape.ardl.op
+GoF(model.ardl.op)
+```
+
+Berdasarkan hasil estimasi model **ARDL(2,13)**, diperoleh persamaan:
+
+$$\hat{Y}_t = -1.04456 + 0.40658X_t + 0.20835X_{t-1} - 0.09590X_{t-2} - 0.13900X_{t-3} + 0.07385X_{t-4} + 0.05911X_{t-5} - 0.15248X_{t-6} + 0.25536X_{t-7} - 0.28691X_{t-8} + 0.12287X_{t-9} + 0.13887X_{t-10} - 0.20179X_{t-11} + 0.05814X_{t-12} + 0.01800X_{t-13} - 0.11385Y_{t-1} + 0.14225Y_{t-2}$$
+
+Koefisien $X_t$ sebesar **0.40658** berpengaruh positif dan signifikan
+terhadap $Y_t$ dengan nilai-p $2.67\times10^{-6}$. Sementara itu,
+seluruh variabel lag lainnya tidak berpengaruh signifikan pada taraf 5%,
+meskipun $X_{t-7}$ dan $X_{t-8}$ menunjukkan pengaruh yang mendekati
+signifikan dengan nilai-p masing-masing **0.0680** dan **0.0528**.
+
+Nilai $R^2$ sebesar **0.9892** menunjukkan bahwa model mampu menjelaskan
+**98.92%** variasi $Y_t$, sedangkan sisanya sebesar 1.08% dijelaskan
+oleh faktor lain di luar model. Nilai *Adjusted R-squared* sebesar
+**0.9831** menunjukkan bahwa model memiliki kemampuan penjelasan yang
+sangat tinggi. Uji F menghasilkan nilai-p **\< 2.2 × 10⁻¹⁶**, sehingga
+model secara keseluruhan signifikan.
+
+Nilai **AIC sebesar 29.4239** dan **BIC sebesar 61.9438**. Berdasarkan
+hasil peramalan, diperoleh **MAPE sebesar 0.00711 atau 0.71%**. Nilai
+**MASE sebesar 0.35473 (\<1)** menunjukkan bahwa model memiliki kinerja
+peramalan yang lebih baik dibandingkan metode naif sebagai pembanding.
+
+# Perbandingan Antar Model dengan `dynlm`
+
+```{r}
+cons_lm1 <- dynlm(Yt ~ Xt + L(Xt), data = train.ts)             # DLM q = 1
+cons_lm2 <- dynlm(Yt ~ Xt + L(Yt), data = train.ts)             # Koyck
+cons_lm3 <- dynlm(Yt ~ Xt + L(Xt) + L(Yt), data = train.ts)     # ARDL p=1, q=1
+cons_lm4 <- dynlm(Yt ~ Xt + L(Xt) + L(Xt, 2), data = train.ts)  # DLM q = 2
+
+summary(cons_lm1)
+summary(cons_lm2)
+summary(cons_lm3)
+summary(cons_lm4)
+```
+
+Berdasarkan hasil estimasi, keempat model secara keseluruhan signifikan
+karena masing-masing memiliki nilai-p **\< 2.2 × 10⁻¹⁶**. Pada **Model
+1** ($Y_t \sim X_t + X_{t-1}$), hanya $X_t$ yang berpengaruh positif dan
+signifikan terhadap $Y_t$, sedangkan $X_{t-1}$ tidak signifikan. Model
+ini memiliki nilai *Adjusted R-squared* sebesar **0.9441**.
+
+Pada **Model 2** ($Y_t \sim X_t + Y_{t-1}$), baik $X_t$ maupun $Y_{t-1}$
+berpengaruh positif dan signifikan terhadap $Y_t$, dengan *Adjusted
+R-squared* sebesar **0.9561**. Pada **Model 3**
+($Y_t \sim X_t + X_{t-1} + Y_{t-1}$), seluruh variabel $X_t$, $X_{t-1}$,
+dan $Y_{t-1}$ berpengaruh signifikan terhadap $Y_t$. Model ini memiliki
+*Adjusted R-squared* sebesar **0.9700**, yang merupakan nilai tertinggi
+dibandingkan ketiga model lainnya.
+
+Sementara itu, pada **Model 4** ($Y_t \sim X_t + X_{t-1} + X_{t-2}$),
+hanya $X_t$ yang berpengaruh signifikan, sedangkan $X_{t-1}$ dan
+$X_{t-2}$ tidak signifikan. Model ini memiliki *Adjusted R-squared*
+sebesar **0.9749**, sehingga berdasarkan ukuran tersebut Model 4
+memiliki kemampuan penjelasan variasi $Y_t$ paling tinggi di antara
+keempat model.
+
+## SSE
+
+```{r}
+data.frame(
+  Model = c("cons_lm1 (DLM q=1)", "cons_lm2 (Koyck)",
+            "cons_lm3 (ARDL 1,1)", "cons_lm4 (DLM q=2)"),
+  SSE = c(deviance(cons_lm1), deviance(cons_lm2),
+          deviance(cons_lm3), deviance(cons_lm4))
+)
+```
+
+Berdasarkan nilai *Sum of Squared Errors* (SSE), Model 4 yaitu **DLM
+q=2** merupakan model terbaik karena memiliki nilai SSE paling kecil,
+yaitu sebesar **6.353772**. Selanjutnya, Model 3 (**ARDL 1,1**) memiliki
+SSE sebesar **7.641805**, Model 2 (**Koyck**) sebesar **11.401427**, dan
+Model 1 (**DLM q=1**) sebesar **14.508020**. Dengan demikian,
+berdasarkan kriteria SSE, **DLM q=2 dipilih sebagai model terbaik**
+karena menghasilkan kesalahan prediksi paling kecil.
+
+## Uji Encompassing
+
+```{r}
+encomptest(cons_lm1, cons_lm2)
+```
+
+Berdasarkan hasil *Encompassing Test*, diperoleh nilai-p sebesar **6.514
+× 10⁻⁹** untuk perbandingan Model 1 dengan Model E dan **4.562 × 10⁻⁶**
+untuk perbandingan Model 2 dengan Model E. Kedua nilai-p lebih kecil
+dari taraf signifikansi 5%, sehingga $H_0$ ditolak pada kedua pengujian.
+Artinya, baik Model 1 maupun Model 2 masih memiliki informasi yang dapat
+ditambahkan dari model lainnya. Dengan demikian, **Model E lebih baik
+dalam menjelaskan** $Y_t$ karena menggabungkan informasi dari $X_t$,
+$X_{t-1}$, dan $Y_{t-1}$.
+
+# Uji Asumsi
+
+## Uji Autokorelasi (Durbin-Watson)
+
+$H_0$: tidak terdapat autokorelasi pada sisaan.
+
+```{r}
+dwtest(cons_lm1)
+dwtest(cons_lm2)
+dwtest(cons_lm3)
+dwtest(cons_lm4)
+```
+
+Berdasarkan hasil uji Durbin-Watson, Model 1 memiliki nilai DW sebesar
+1.0808 dengan nilai-p 4.224 × 10⁻⁵, sehingga terdapat autokorelasi
+positif pada residual. Model 2 juga menunjukkan adanya autokorelasi
+positif dengan nilai DW sebesar 1.5997 dan nilai-p 0.03841.
+
+Sementara itu, Model 3 memiliki nilai DW sebesar 2.7648 dengan nilai-p
+0.9961, sedangkan Model 4 memiliki nilai DW sebesar 2.1132 dengan
+nilai-p 0.5554. Karena nilai-p keduanya lebih besar dari 5%, tidak
+terdapat cukup bukti adanya autokorelasi positif pada residual Model 3
+dan Model 4.
+
+Dengan demikian, berdasarkan uji Durbin-Watson, Model 3 dan Model 4
+memenuhi asumsi tidak adanya autokorelasi positif, sedangkan Model 1 dan
+Model 2 masih mengalami autokorelasi positif.
+
+## Uji Heteroskedastisitas (Breusch-Pagan)
+
+$H_0$: ragam sisaan homogen.
+
+```{r}
+bptest(cons_lm1)
+bptest(cons_lm2)
+bptest(cons_lm3)
+bptest(cons_lm4)
+```
+
+Berdasarkan hasil uji **Breusch-Pagan**, Model 1 memiliki nilai-p
+sebesar **0.5953 \> 0.05**, sehingga tidak terdapat cukup bukti adanya
+heteroskedastisitas pada residual. Model 2 memiliki nilai-p sebesar
+**7.456 × 10⁻⁶ \< 0.05**, sehingga terdapat heteroskedastisitas pada
+residual. Hal yang sama juga terjadi pada Model 3 dengan nilai-p sebesar
+**0.003207 \< 0.05**, yang menunjukkan adanya heteroskedastisitas.
+
+Sementara itu, Model 4 memiliki nilai-p sebesar **0.8149 \> 0.05**,
+sehingga tidak terdapat cukup bukti adanya heteroskedastisitas pada
+residual. Dengan demikian, berdasarkan uji Breusch-Pagan, **Model 1 dan
+Model 4 memenuhi asumsi homoskedastisitas**, sedangkan Model 2 dan Model
+3 mengalami heteroskedastisitas.
+
+## Uji Normalitas Sisaan (Shapiro-Wilk)
+
+$H_0$: sisaan berdistribusi normal.
+
+```{r}
+shapiro.test(residuals(cons_lm1))
+shapiro.test(residuals(cons_lm2))
+shapiro.test(residuals(cons_lm3))
+shapiro.test(residuals(cons_lm4))
+```
+
+Berdasarkan hasil uji **Shapiro-Wilk**, Model 1 memiliki nilai-p sebesar
+**7.651 × 10⁻¹⁰ \< 0.05**, sehingga residual tidak berdistribusi normal.
+Model 2 juga memiliki nilai-p sebesar **0.003296 \< 0.05**, sehingga
+residual tidak berdistribusi normal.
+
+Pada Model 3, diperoleh nilai-p sebesar **0.1375 \> 0.05**, sehingga
+tidak terdapat cukup bukti untuk menolak asumsi normalitas residual.
+Dengan demikian, residual Model 3 dapat dianggap berdistribusi normal.
+Sementara itu, Model 4 memiliki nilai-p sebesar **7.243 × 10⁻⁶ \<
+0.05**, sehingga residual tidak berdistribusi normal.
+
+Dengan demikian, berdasarkan uji Shapiro-Wilk, **hanya Model 3 yang
+memenuhi asumsi normalitas residual**, sedangkan Model 1, Model 2, dan
+Model 4 tidak memenuhi asumsi tersebut.
+
+```{r}
+par(mfrow = c(1, 2))
+qqnorm(residuals(cons_lm3), main = "Q-Q Plot Sisaan ARDL(1,1)")
+qqline(residuals(cons_lm3), col = "red")
+plot(fitted(cons_lm3), residuals(cons_lm3), pch = 16, col = "steelblue",
+     xlab = "Nilai Dugaan", ylab = "Sisaan", main = "Sisaan vs Nilai Dugaan")
+abline(h = 0, col = "red", lty = 2)
+par(mfrow = c(1, 1))
+```
+
+# Perbandingan Model dan Pemilihan Model Terbaik
+
+```{r}
+akurasi <- matrix(c(mape.koyck, mape.dlm, mape.dlm2, mape.ardl, mape.ardl.op))
+row.names(akurasi) <- c("Koyck",
+                        "DLM q=2",
+                        paste0("DLM q=", q.opt, " (optimum)"),
+                        "ARDL (p=1, q=1)",
+                        paste0("ARDL optimum (p=", p_opt, ", q=", q_opt, ")"))
+colnames(akurasi) <- c("MAPE")
+akurasi
+
+best <- row.names(akurasi)[which.min(akurasi[, 1])]
+best
+```
+
+Berdasarkan nilai **Mean Absolute Percentage Error (MAPE)**, model
+dengan nilai MAPE terkecil adalah **DLM q=2**, yaitu sebesar **0.00641**
+atau sekitar **0.64%**. Selanjutnya, ARDL (p=1, q=1) memiliki MAPE
+sebesar **0.78%**, DLM q=10 sebesar **1.27%**, ARDL optimum sebesar
+**1.45%**, dan Koyck sebesar **2.91%**.
+
+Dengan demikian, **DLM q=2 dipilih sebagai model terbaik** karena
+menghasilkan nilai MAPE paling kecil, yang menunjukkan bahwa model
+tersebut memiliki tingkat kesalahan prediksi paling rendah dibandingkan
+model lainnya.
+
+## Plot Perbandingan Hasil Peramalan
+
+```{r fig.width=9, fig.height=5}
+rng <- range(c(test$Yt, fore.koyck$forecasts, fore.dlm$forecasts,
+               fore.dlm2$forecasts, fore.ardl$forecasts,
+               fore.ardl.op$forecasts))
+
+plot(test$t, test$Yt, type = "b", pch = 16, col = "black", ylim = rng,
+     xlab = "Periode (jam)", ylab = "AQI",
+     main = "Perbandingan Hasil Peramalan pada Data Uji")
+lines(test$t, fore.koyck$forecasts, col = "red");       points(test$t, fore.koyck$forecasts, col = "red", pch = 1)
+lines(test$t, fore.dlm$forecasts, col = "blue");        points(test$t, fore.dlm$forecasts, col = "blue", pch = 1)
+lines(test$t, fore.dlm2$forecasts, col = "orange");     points(test$t, fore.dlm2$forecasts, col = "orange", pch = 1)
+lines(test$t, fore.ardl$forecasts, col = "green3");     points(test$t, fore.ardl$forecasts, col = "green3", pch = 1)
+lines(test$t, fore.ardl.op$forecasts, col = "purple");  points(test$t, fore.ardl.op$forecasts, col = "purple", pch = 1)
+legend("topleft",
+       c("Aktual", "Koyck", "DLM q=2", paste0("DLM q=", q.opt),
+         "ARDL (1,1)", "ARDL optimum"),
+       lty = 1, col = c("black", "red", "blue", "orange", "green3", "purple"),
+       cex = 0.75, bty = "n")
+```
+
+```{r fig.width=9, fig.height=5}
+# plot keseluruhan: data latih, data uji, dan ramalan model terbaik
+plot(data$t, data$Yt, type = "l", col = "grey40",
+     xlab = "Periode (jam)", ylab = "AQI",
+     main = "AQI Aktual dan Hasil Peramalan")
+abline(v = n_train, lty = 2, col = "grey60")
+lines(test$t, fore.koyck$forecasts, col = "red", lwd = 2)
+lines(test$t, fore.ardl$forecasts, col = "green3", lwd = 2)
+legend("topleft", c("Aktual", "Ramalan Koyck", "Ramalan ARDL(1,1)"),
+       lty = 1, lwd = c(1, 2, 2), col = c("grey40", "red", "green3"),
+       cex = 0.8, bty = "n")
+text(n_train, min(data$Yt), "batas latih/uji", pos = 4, cex = 0.7, col = "grey40")
+```
+
+# Kesimpulan
+
+1.  **Peubah penjelas.** Dari enam polutan yang tersedia, konsentrasi
+    **ozon (`o3`)** memiliki korelasi paling kuat terhadap AQI Kota New
+    Delhi dengan nilai korelasi sebesar $r \approx 0{,}9736$, sehingga
+    dipilih sebagai peubah penjelas $X$.
+
+2.  **Model yang dicobakan.** Lima model regresi dengan peubah *lag*
+    diterapkan pada data latih, yaitu **Koyck, DLM dengan** $q=2$, DLM
+    dengan $q=10$ sebagai ordo optimum, ARDL$(1,1)$, serta ARDL dengan
+    ordo optimum.
+
+3.  **Model terbaik.** Berdasarkan nilai **MAPE pada data uji**, model
+    terbaik adalah **DLM dengan** $q=2$ dengan nilai MAPE sebesar
+    **0,00641** atau sekitar **0,64%**. Nilai tersebut merupakan yang
+    paling kecil dibandingkan Koyck sebesar 2,91%, DLM $q=10$ sebesar
+    1,27%, ARDL$(1,1)$ sebesar 0,78%, dan ARDL optimum sebesar 1,45%.
+    Dengan demikian, DLM $q=2$ memberikan akurasi prediksi terbaik pada
+    data uji.
+
+4.  **Uji asumsi.** Berdasarkan uji Durbin-Watson, Breusch-Pagan, dan
+    Shapiro-Wilk pada model-model yang dibandingkan, **DLM** $q=2$
+    (Model 4) tidak menunjukkan adanya autokorelasi positif dan
+    heteroskedastisitas karena masing-masing memiliki nilai-p sebesar
+    **0,5554** dan **0,8149**. Namun, hasil uji Shapiro-Wilk menunjukkan
+    nilai-p sebesar $7,243 \times 10^{-6}$, sehingga residual DLM $q=2$
+    belum memenuhi asumsi normalitas.
+
+5.  **Implikasi.** Hasil pemodelan menunjukkan bahwa konsentrasi ozon
+    pada periode saat ini berperan penting dalam menjelaskan AQI.
+    Meskipun beberapa model memasukkan pengaruh *lag*, model **DLM**
+    $q=2$ memberikan akurasi prediksi terbaik. Oleh karena itu,
+    pemantauan kualitas udara dapat mempertimbangkan informasi
+    konsentrasi ozon pada periode berjalan maupun periode sebelumnya
+    untuk meningkatkan prediksi AQI.
