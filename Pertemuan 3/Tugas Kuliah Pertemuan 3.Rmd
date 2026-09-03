@@ -1,1 +1,685 @@
+---
+title: "Tugas Kuliah Pertemuan 3"
+author: "Yoan Puti Nazera"
+date: "2026-09-03"
+output: rmdformats::readthedown
+---
 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# Library
+
+```{r}
+library(dLagM)      
+library(dynlm)      
+library(MLmetrics)  
+library(lmtest)     
+library(car)
+```
+
+# SOAL 1 : Pangsa Pasar (Y) terhadap Harga (X)
+
+Data pangsa pasar (*market share*) dan harga (*price*) suatu produk pasta gigi selama 20 periode.
+
+## Data
+
+```{r}
+Period <- 1:20
+MarketShare <- c(3.63, 4.20, 3.33, 4.54, 2.89, 4.87, 4.90, 5.29, 6.18, 7.20,
+                 7.25, 6.09, 6.80, 8.65, 8.43, 8.29, 7.18, 7.90, 8.45, 8.23)
+Price <- c(0.97, 0.95, 0.99, 0.91, 0.98, 0.90, 0.89, 0.86, 0.85, 0.82,
+           0.79, 0.83, 0.81, 0.77, 0.76, 0.80, 0.83, 0.79, 0.76, 0.78)
+
+data1 <- data.frame(t = Period, Yt = MarketShare, Xt = Price)
+str(data1)
+data1
+```
+
+## Eksplorasi Data
+
+```{r}
+par(mfrow = c(1, 2))
+plot(data1$t, data1$Yt, type = "o", pch = 16, col = "steelblue",
+     xlab = "Periode", ylab = "Market Share", main = "Plot Y (Market Share)")
+plot(data1$t, data1$Xt, type = "o", pch = 16, col = "tomato",
+     xlab = "Periode", ylab = "Price", main = "Plot X (Price)")
+par(mfrow = c(1, 1))
+
+plot(data1$Xt, data1$Yt, pch = 16, col = "darkgreen",
+     xlab = "Price (X)", ylab = "Market Share (Y)",
+     main = "Scatterplot Y vs X")
+cor(data1$Yt, data1$Xt)
+```
+
+Korelasi sebesar $-0,9753$ menunjukkan hubungan negatif yang sangat kuat antara harga dan pangsa pasar. Oleh karena itu, hubungan tersebut layak dilanjutkan ke pemodelan *distributed lag* untuk mengetahui apakah pengaruh harga terhadap pangsa pasar bersifat langsung melalui $X_t$ atau tertunda pada beberapa periode, yaitu $X_{t-1}, X_{t-2}, \dots$.
+
+## Pembagian Data (80% train : 20% test)
+
+```{r}
+train1 <- data1[1:16, ]
+test1  <- data1[17:20, ]
+
+train1.ts <- ts(train1)
+test1.ts  <- ts(test1)
+data1.ts  <- ts(data1)
+```
+
+## Model 1: Koyck
+
+```{r}
+model1.koyck <- koyckDlm(x = train1$Xt, y = train1$Yt)
+summary(model1.koyck)
+AIC(model1.koyck)
+BIC(model1.koyck)
+```
+
+Peubah $Y_{t-1}$ memiliki nilai-p sebesar 0,357 dan peubah $X_t$ memiliki nilai-p sebesar 0,367. Karena kedua nilai-p $> 0,05$, maka kedua peubah tersebut tidak berpengaruh signifikan secara parsial terhadap $Y_t$. Namun, hasil Wald test menunjukkan nilai-p sebesar $3,383 \times 10^{-6} < 0,05$, sehingga model secara keseluruhan signifikan.
+
+Model yang terbentuk adalah:
+
+$$
+\hat{Y}_t = 14,1547 - 12,4022X_t + 0,4356Y_{t-1}
+$$
+
+Nilai $R^2 = 0,9013$ menunjukkan bahwa sebesar 90,13\% variasi $Y_t$ dapat dijelaskan oleh model.
+
+### Peramalan dan Akurasi
+
+```{r}
+fore1.koyck <- forecast(model = model1.koyck, x = test1$Xt, h = nrow(test1))
+fore1.koyck
+
+mape1.koyck <- MAPE(fore1.koyck$forecasts, test1$Yt)
+mape1.koyck          # akurasi data test
+GoF(model1.koyck)    # akurasi data train
+```
+Model Koyck menghasilkan ramalan sebesar 7,4723; 7,6121; 8,0451; dan 7,9857. Berdasarkan evaluasi, diperoleh MAE sebesar 0,4501, MSE sebesar 0,3090, dan MAPE sebesar 0,0895, yang menunjukkan bahwa model memiliki kesalahan peramalan yang relatif rendah.
+
+## Model 2: Distributed Lag Model (q = 2)
+
+```{r}
+model1.dlm <- dlm(x = train1$Xt, y = train1$Yt, q = 2)
+summary(model1.dlm)
+AIC(model1.dlm)
+BIC(model1.dlm)
+```
+
+Berdasarkan hasil estimasi, peubah $X_t$ memiliki nilai-p sebesar 0,000459 < 0,05 sehingga berpengaruh signifikan terhadap $Y_t$. Sementara itu, peubah $X_{t-1}$ dan $X_{t-2}$ memiliki nilai-p masing-masing sebesar 0,699626 dan 0,509026 > 0,05 sehingga tidak berpengaruh signifikan terhadap $Y_t$.
+
+Model secara keseluruhan signifikan berdasarkan uji F dengan nilai-p sebesar $1,255 \times 10^{-6} < 0,05$. Nilai $R^2$ sebesar 0,9456 menunjukkan bahwa 94,56\% variasi $Y_t$ dapat dijelaskan oleh $X_t$, $X_{t-1}$, dan $X_{t-2}$.
+
+Model yang terbentuk adalah:
+
+$$
+\hat{Y}_t = 27,690 - 20,911X_t - 1,384X_{t-1} - 2,930X_{t-2}
+$$
+
+Berdasarkan nilai AIC sebesar 24,9097 dan BIC sebesar 28,1050, model dapat digunakan untuk pemodelan *distributed lag* dengan lag hingga 2 periode.
+
+### Peramalan dan Akurasi
+
+```{r}
+fore1.dlm <- forecast(model = model1.dlm, x = test1$Xt, h = nrow(test1))
+fore1.dlm
+
+mape1.dlm <- MAPE(fore1.dlm$forecasts, test1$Yt)
+mape1.dlm
+GoF(model1.dlm)
+```
+Hasil peramalan model *distributed lag* menghasilkan nilai ramalan sebesar 7,0001; 7,6778; 8,2726; dan 8,0131 untuk empat periode ke depan. Berdasarkan hasil evaluasi, diperoleh MAE sebesar 0,3271, MSE sebesar 0,1698, dan MAPE sebesar 0,0557. Nilai MAPE yang rendah menunjukkan bahwa model memiliki tingkat kesalahan peramalan yang relatif kecil.
+
+## Model 3: Distributed Lag Model dengan Lag Optimum
+
+```{r}
+finiteDLMauto(formula = Yt ~ Xt,
+              data = data.frame(train1),
+              q.min = 1, q.max = 6,
+              model.type = "dlm", error.type = "AIC", trace = TRUE)
+```
+
+Berdasarkan hasil perbandingan model, model dengan lag 6 memiliki performa terbaik karena menghasilkan nilai MASE paling kecil, yaitu 0,13287, serta nilai AIC sebesar 1,98713 dan BIC sebesar 4,71040 yang paling rendah dibandingkan model lainnya. Selain itu, model lag 6 memiliki nilai $R^2$ terkoreksi sebesar 0,96533 yang menunjukkan kemampuan model dalam menjelaskan variasi $Y_t$ sebesar 96,53%. Oleh karena itu, model dengan lag 6 dipilih sebagai model *distributed lag* terbaik.
+
+```{r}
+qauto <- finiteDLMauto(formula = Yt ~ Xt, data = data.frame(train1),
+                       q.min = 1, q.max = 6,
+                       model.type = "dlm", error.type = "AIC", trace = FALSE)
+q.opt <- as.numeric(rownames(qauto)[which.min(qauto$AIC)])
+q.opt
+
+model1.dlm2 <- dlm(x = train1$Xt, y = train1$Yt, q = q.opt)
+summary(model1.dlm2)
+AIC(model1.dlm2)
+BIC(model1.dlm2)
+```
+Berdasarkan hasil estimasi, peubah $X_t$ memiliki nilai-p sebesar 0,01624 < 0,05 sehingga berpengaruh signifikan terhadap $Y_t$. Peubah $X_{t-6}$ juga berpengaruh signifikan dengan nilai-p sebesar 0,04213 < 0,05. Sementara itu, peubah $X_{t-1}$, $X_{t-2}$, $X_{t-3}$, dan $X_{t-5}$ tidak berpengaruh signifikan karena memiliki nilai-p > 0,05. Peubah $X_{t-4}$ memiliki nilai-p sebesar 0,05182 sehingga tidak signifikan pada taraf 5%, tetapi mendekati signifikan.
+
+Model secara keseluruhan signifikan berdasarkan uji F dengan nilai-p sebesar 0,02671 < 0,05. Nilai $R^2$ sebesar 0,9923 menunjukkan bahwa 99,23% variasi $Y_t$ dapat dijelaskan oleh peubah dalam model, sedangkan 0,77% dijelaskan oleh faktor lain di luar model.
+
+Model yang terbentuk adalah:
+
+$$
+\hat{Y}_t = 39,6104 - 44,9998X_t - 0,0039X_{t-1} - 0,7549X_{t-2} + 2,6130X_{t-3} + 20,8662X_{t-4} - 0,2260X_{t-5} - 17,2229X_{t-6}
+$$
+
+Model ini memiliki nilai AIC sebesar 1,9871 dan BIC sebesar 4,7104.
+
+### Peramalan dan Akurasi
+
+```{r}
+fore1.dlm2 <- forecast(model = model1.dlm2, x = test1$Xt, h = nrow(test1))
+mape1.dlm2 <- MAPE(fore1.dlm2$forecasts, test1$Yt)
+mape1.dlm2
+GoF(model1.dlm2)
+```
+Hasil peramalan model distributed lag dengan lag 6 menghasilkan nilai MAPE sebesar 0,07898. Berdasarkan hasil evaluasi, diperoleh MAE sebesar 0,09493, MAPE sebesar 0,01314, dan MASE sebesar 0,13287. Nilai MAPE yang sangat kecil menunjukkan bahwa model memiliki tingkat kesalahan peramalan yang rendah sehingga model distributed lag dengan lag 6 memiliki kemampuan peramalan yang baik.
+
+## Model 4: Autoregressive (ARDL p = 1, q = 1)
+
+```{r}
+model1.ardl <- ardlDlm(formula = Yt ~ Xt, data = train1, p = 1, q = 1)
+summary(model1.ardl)
+AIC(model1.ardl)
+BIC(model1.ardl)
+```
+
+Berdasarkan hasil estimasi model ARDL(1,1), peubah $X_t$ memiliki nilai-p sebesar $1,7 \times 10^{-5} < 0,05$ sehingga berpengaruh signifikan terhadap $Y_t$. Sementara itu, $X_{t-1}$ dan $Y_{t-1}$ memiliki nilai-p masing-masing sebesar 0,3612 dan 0,2249 $> 0,05$, sehingga keduanya tidak berpengaruh signifikan terhadap $Y_t$.
+
+Model secara keseluruhan signifikan berdasarkan uji F dengan nilai-p sebesar $2,147 \times 10^{-7} < 0,05$. Nilai $R^2$ sebesar 0,9490 menunjukkan bahwa 94,90\% variasi $Y_t$ dapat dijelaskan oleh model ARDL(1,1).
+
+Model yang terbentuk adalah:
+
+$$
+\hat{Y}_t = 16,0526 - 22,3164X_t + 7,6883X_{t-1} + 0,4233Y_{t-1}
+$$
+
+Model memiliki nilai AIC sebesar 25,0363 dan BIC sebesar 28,5765.
+
+### Peramalan dan Akurasi
+
+```{r}
+fore1.ardl <- forecast(model = model1.ardl, x = test1$Xt, h = nrow(test1))
+fore1.ardl
+
+mape1.ardl <- MAPE(fore1.ardl$forecasts, test1$Yt)
+mape1.ardl
+GoF(model1.ardl)
+```
+
+## Lag Optimum Model Autoregressive
+
+```{r}
+model1.ardl.opt <- ardlBoundOrders(data = data.frame(data1), ic = "AIC",
+                                   formula = Yt ~ Xt)
+model1.ardl.opt$Stat.table
+
+min_p <- c()
+for (i in 1:6) {
+  min_p[i] <- min(model1.ardl.opt$Stat.table[[i]], na.rm = TRUE)
+}
+q_opt <- which(min_p == min(min_p, na.rm = TRUE))
+p_opt <- which(model1.ardl.opt$Stat.table[[q_opt]] ==
+                 min(model1.ardl.opt$Stat.table[[q_opt]], na.rm = TRUE))
+data.frame("q_optimum" = q_opt, "p_optimum" = p_opt,
+           "AIC" = model1.ardl.opt$min.Stat)
+```
+
+## Pemodelan dengan `dynlm`
+
+```{r}
+cons_lm1 <- dynlm(Yt ~ Xt + L(Xt), data = train1.ts)            
+cons_lm2 <- dynlm(Yt ~ Xt + L(Yt), data = train1.ts)              
+cons_lm3 <- dynlm(Yt ~ Xt + L(Xt) + L(Yt), data = train1.ts)      
+cons_lm4 <- dynlm(Yt ~ Xt + L(Xt) + L(Xt, 2), data = train1.ts)   
+
+summary(cons_lm1)
+summary(cons_lm2)
+summary(cons_lm3)
+summary(cons_lm4)
+```
+Berdasarkan hasil estimasi model, pada model $Y_t \sim X_t + X_{t-1}$, peubah $X_t$ berpengaruh signifikan terhadap $Y_t$ dengan nilai-p sebesar $1,34 \times 10^{-5} < 0,05$, sedangkan $X_{t-1}$ tidak signifikan dengan nilai-p sebesar $0,532 > 0,05$. Model memiliki nilai $R^2$ sebesar $0,9414$, yang menunjukkan bahwa $94,14%$ variasi $Y_t$ dapat dijelaskan oleh model. Uji F menunjukkan model secara keseluruhan signifikan dengan nilai-p sebesar $4,069 \times 10^{-8}$. Model yang terbentuk adalah
+
+$$
+\hat{Y}_t = 26,885 - 22,363X_t - 1,962X_{t-1}.
+$$
+
+Pada model $Y_t \sim X_t + Y_{t-1}$, peubah $X_t$ berpengaruh signifikan terhadap $Y_t$ dengan nilai-p sebesar $9,50 \times 10^{-6} < 0,05$, sedangkan $Y_{t-1}$ tidak signifikan dengan nilai-p sebesar $0,296 > 0,05$. Model memiliki nilai $R^2$ sebesar $0,9448$, sehingga $94,48%$ variasi $Y_t$ dapat dijelaskan oleh model. Uji F menunjukkan model secara keseluruhan signifikan dengan nilai-p sebesar $2,826 \times 10^{-8}$. Model yang terbentuk adalah
+
+$$
+\hat{Y}_t = 23,6430 - 21,4428X_t + 0,1316Y_{t-1}.
+$$
+
+Pada model ARDL(1,1), peubah $X_t$ berpengaruh signifikan terhadap $Y_t$ dengan nilai-p sebesar $1,7 \times 10^{-5} < 0,05$, sedangkan $X_{t-1}$ dan $Y_{t-1}$ tidak signifikan dengan nilai-p masing-masing sebesar $0,3612$ dan $0,2249 > 0,05$. Model memiliki nilai $R^2$ sebesar $0,9490$, sehingga $94,90%$ variasi $Y_t$ dapat dijelaskan oleh model. Uji F menunjukkan model secara keseluruhan signifikan dengan nilai-p sebesar $2,147 \times 10^{-7}$. Model yang terbentuk adalah
+
+$$
+\hat{Y}_t = 16,0526 - 22,3164X_t + 7,6883X_{t-1} + 0,4233Y_{t-1}.
+$$
+
+Pada model distributed lag dengan lag hingga $2$, peubah $X_t$ berpengaruh signifikan terhadap $Y_t$ dengan nilai-p sebesar $0,000459 < 0,05$, sedangkan $X_{t-1}$ dan $X_{t-2}$ tidak signifikan dengan nilai-p masing-masing sebesar $0,699626$ dan $0,509026 > 0,05$. Model memiliki nilai $R^2$ sebesar $0,9456$, sehingga $94,56%$ variasi $Y_t$ dapat dijelaskan oleh model. Uji F menunjukkan model secara keseluruhan signifikan dengan nilai-p sebesar $1,255 \times 10^{-6}$. Model yang terbentuk adalah
+
+$$
+\hat{Y}_t = 27,690 - 20,911X_t - 1,384X_{t-1} - 2,930X_{t-2}.
+$$
+
+### SSE
+
+```{r}
+data.frame(
+  Model = c("cons_lm1", "cons_lm2", "cons_lm3", "cons_lm4"),
+  SSE = c(deviance(cons_lm1), deviance(cons_lm2),
+          deviance(cons_lm3), deviance(cons_lm4))
+)
+```
+
+Berdasarkan nilai SSE, **cons_lm4** memiliki nilai SSE paling kecil, yaitu sebesar $2,377753$, dibandingkan model lainnya. Selanjutnya, cons_lm3 memiliki SSE sebesar $2,393101$, cons_lm2 sebesar $2,590590$, dan cons_lm1 sebesar $2,752871$. Karena nilai SSE yang lebih kecil menunjukkan tingkat kesalahan yang lebih rendah, maka **cons_lm4 merupakan model terbaik berdasarkan kriteria SSE**.
+
+### Uji Encompassing
+
+```{r}
+encomptest(cons_lm1, cons_lm2)
+```
+Berdasarkan hasil *encompassing test*, diperoleh nilai-p sebesar $0,2249$ untuk perbandingan M1 dengan ME dan sebesar $0,3612$ untuk perbandingan M2 dengan ME. Kedua nilai-p tersebut lebih besar dari taraf nyata $0,05$, sehingga tidak terdapat bukti yang cukup untuk menolak hipotesis nol pada kedua pengujian.
+
+Dengan demikian, **M1 dan M2 tidak dapat dinyatakan mengandung informasi yang lebih unggul satu sama lain melalui model encompassing (ME)**. Oleh karena itu, berdasarkan *encompassing test*, tidak terdapat bukti yang cukup untuk memilih salah satu model secara signifikan dibandingkan model lainnya.
+
+### Uji Autokorelasi (Durbin-Watson)
+
+```{r}
+dwtest(cons_lm1)
+dwtest(cons_lm2)
+dwtest(cons_lm3)
+dwtest(cons_lm4)
+```
+Berdasarkan uji Durbin-Watson, pada **cons_lm1** diperoleh nilai DW sebesar $1,2509$ dengan nilai-p sebesar $0,04163 < 0,05$. Hal ini menunjukkan adanya **autokorelasi positif** pada residual model cons_lm1.
+
+Pada **cons_lm2**, diperoleh nilai DW sebesar $1,485$ dengan nilai-p sebesar $0,08951 > 0,05$, sehingga tidak terdapat bukti yang cukup adanya autokorelasi positif pada residual.
+
+Pada **cons_lm3**, diperoleh nilai DW sebesar $1,8314$ dengan nilai-p sebesar $0,272 > 0,05$, sehingga tidak terdapat bukti adanya autokorelasi positif pada residual.
+
+Pada **cons_lm4**, diperoleh nilai DW sebesar $1,4728$ dengan nilai-p sebesar $0,1279 > 0,05$, sehingga tidak terdapat bukti yang cukup adanya autokorelasi positif pada residual.
+
+Dengan demikian, **cons_lm1 mengalami masalah autokorelasi positif**, sedangkan **cons_lm2, cons_lm3, dan cons_lm4 tidak menunjukkan adanya autokorelasi positif yang signifikan** berdasarkan uji Durbin-Watson.
+
+### Uji Heteroskedastisitas (Breusch-Pagan)
+
+```{r}
+bptest(cons_lm1)
+bptest(cons_lm2)
+bptest(cons_lm3)
+bptest(cons_lm4)
+```
+
+Berdasarkan uji *Breusch-Pagan*, diperoleh nilai-p sebesar $0,1094$ pada cons_lm1, $0,1755$ pada cons_lm2, $0,1660$ pada cons_lm3, dan $0,09026$ pada cons_lm4. Seluruh nilai-p lebih besar dari taraf nyata $0,05$, sehingga tidak terdapat bukti yang cukup untuk menolak hipotesis nol.
+
+Dengan demikian, **cons_lm1, cons_lm2, cons_lm3, dan cons_lm4 tidak mengalami masalah heteroskedastisitas**, atau dapat dikatakan bahwa residual pada keempat model memiliki ragam yang homogen (*homoskedastisitas*).
+
+### Uji Normalitas Sisaan (Shapiro-Wilk)
+
+$H_0$: sisaan berdistribusi normal; $H_1$: sisaan tidak berdistribusi normal.
+
+```{r}
+shapiro.test(residuals(cons_lm1))
+shapiro.test(residuals(cons_lm2))
+shapiro.test(residuals(cons_lm3))
+shapiro.test(residuals(cons_lm4))
+```
+Berdasarkan uji Shapiro-Wilk, diperoleh nilai-p sebesar $0,6756$ pada cons_lm1, $0,8100$ pada cons_lm2, $0,2738$ pada cons_lm3, dan $0,6764$ pada cons_lm4. Seluruh nilai-p lebih besar dari taraf nyata $0,05$, sehingga tidak terdapat bukti yang cukup untuk menolak hipotesis nol.
+
+Dengan demikian, **residual pada cons_lm1, cons_lm2, cons_lm3, dan cons_lm4 berdistribusi normal**. Artinya, keempat model telah memenuhi asumsi normalitas residual.
+
+## Perbandingan Model
+
+```{r}
+akurasi1 <- matrix(c(mape1.koyck, mape1.dlm, mape1.dlm2, mape1.ardl))
+row.names(akurasi1) <- c("Koyck", "DLM q=2", paste0("DLM q=", q.opt),
+                         "Autoregressive")
+colnames(akurasi1) <- c("MAPE")
+akurasi1
+
+best1 <- row.names(akurasi1)[which.min(akurasi1[, 1])]
+best1
+```
+
+Berdasarkan hasil perbandingan nilai MAPE, model **Autoregressive** memiliki nilai MAPE paling kecil, yaitu sebesar $0,007625$ atau sekitar $0,76%$. Selanjutnya, model DLM $q=2$ memiliki MAPE sebesar $2,51%$, model Koyck sebesar $3,87%$, dan model DLM $q=6$ sebesar $7,90%$. Karena nilai MAPE yang lebih kecil menunjukkan tingkat kesalahan peramalan yang lebih rendah, maka **model Autoregressive dipilih sebagai model terbaik dalam melakukan peramalan**.
+
+
+## Plot Perbandingan Peramalan
+
+```{r}
+plot(test1$Xt, test1$Yt, type = "b", col = "black", pch = 16,
+     ylim = range(c(test1$Yt, fore1.koyck$forecasts, fore1.dlm$forecasts,
+                    fore1.dlm2$forecasts, fore1.ardl$forecasts)),
+     xlab = "Price (X)", ylab = "Market Share (Y)",
+     main = "Perbandingan Hasil Peramalan - Latihan 1")
+points(test1$Xt, fore1.koyck$forecasts, col = "red");    lines(test1$Xt, fore1.koyck$forecasts, col = "red")
+points(test1$Xt, fore1.dlm$forecasts, col = "blue");     lines(test1$Xt, fore1.dlm$forecasts, col = "blue")
+points(test1$Xt, fore1.dlm2$forecasts, col = "orange");  lines(test1$Xt, fore1.dlm2$forecasts, col = "orange")
+points(test1$Xt, fore1.ardl$forecasts, col = "green");   lines(test1$Xt, fore1.ardl$forecasts, col = "green")
+legend("topright",
+       c("Aktual", "Koyck", "DLM q=2", paste0("DLM q=", q.opt), "Autoregressive"),
+       lty = 1, col = c("black", "red", "blue", "orange", "green"), cex = 0.8)
+```
+
+## Kesimpulan
+Hubungan antara harga dan pangsa pasar bersifat negatif dan kuat. Empat pendekatan telah dicobakan: Koyck, DLM dengan $q=2$, DLM dengan lag optimum (berdasarkan AIC), serta model *autoregressive* ARDL(1,1). Berdasarkan tabel perbandingan MAPE data uji, model terbaik adalah model dengan MAPE terkecil Autoregresive . Uji asumsi (Durbin-Watson, Breusch-Pagan, dan Shapiro-Wilk) digunakan untuk memastikan sisaan model terpilih tidak berautokorelasi, memiliki ragam homogen, serta berdistribusi normal.
+
+---
+
+# SOAL 2 : Sales (Y) terhadap Advertising (X)
+
+Data penjualan (*sales*) dan belanja iklan (*advertising*) tahun 1975--2014.
+
+## Data
+
+```{r}
+Year <- 1975:2014
+Sales <- c(11.7, 12.0, 12.3, 12.8, 13.1, 13.6, 13.9, 14.4, 14.7, 15.3,
+           15.5, 15.8, 16.1, 16.6, 16.9, 16.7, 16.9, 17.4, 17.6, 17.9,
+           18.0, 17.9, 18.0, 18.2, 18.2, 18.3, 18.6, 19.2, 19.3, 19.5,
+           19.2, 19.3, 19.5, 20.0, 20.0, 19.9, 19.8, 19.9, 20.2, 21.0)
+Advertising <- c(9.4, 9.6, 10.0, 10.4, 10.8, 10.9, 11.7, 12.2, 12.5, 12.9,
+                 13.0, 13.2, 13.8, 14.2, 14.6, 14.4, 15.0, 15.4, 15.7, 15.9,
+                 15.9, 16.0, 16.3, 16.2, 16.8, 17.3, 17.6, 18.1, 18.3, 18.5,
+                 18.7, 18.9, 19.2, 20.0, 20.0, 20.3, 20.4, 21.0, 21.5, 22.1)
+
+data2 <- data.frame(Year = Year, Yt = Sales, Xt = Advertising)
+str(data2)
+head(data2, 10)
+```
+
+## Eksplorasi Data
+
+```{r}
+plot(data2$Year, data2$Yt, type = "o", pch = 16, col = "steelblue",
+     ylim = range(c(data2$Yt, data2$Xt)),
+     xlab = "Tahun", ylab = "Nilai", main = "Sales dan Advertising 1975-2014")
+lines(data2$Year, data2$Xt, type = "o", pch = 17, col = "tomato")
+legend("topleft", c("Sales (Y)", "Advertising (X)"),
+       lty = 1, pch = c(16, 17), col = c("steelblue", "tomato"), cex = 0.8)
+
+cor(data2$Yt, data2$Xt)
+```
+
+## Pembagian Data (80% train : 20% test)
+
+```{r}
+train2 <- data2[1:32, ]   # 1975-2006
+test2  <- data2[33:40, ]  # 2007-2014
+
+train2.ts <- ts(train2)
+test2.ts  <- ts(test2)
+data2.ts  <- ts(data2)
+```
+
+## Model 1: Koyck
+
+```{r}
+model2.koyck <- koyckDlm(x = train2$Xt, y = train2$Yt)
+summary(model2.koyck)
+AIC(model2.koyck)
+BIC(model2.koyck)
+
+fore2.koyck <- forecast(model = model2.koyck, x = test2$Xt, h = nrow(test2))
+fore2.koyck
+mape2.koyck <- MAPE(fore2.koyck$forecasts, test2$Yt)
+mape2.koyck
+GoF(model2.koyck)
+```
+Berdasarkan hasil estimasi model Koyck, peubah $Y_{t-1}$ berpengaruh signifikan terhadap $Y_t$ dengan nilai-p sebesar $5,6 \times 10^{-9} < 0,05$, sedangkan peubah $X_t$ tidak berpengaruh signifikan dengan nilai-p sebesar $0,2739 > 0,05$. Intersep juga signifikan dengan nilai-p sebesar $0,0029 < 0,05$.
+
+Nilai $R^2$ sebesar $0,9939$ menunjukkan bahwa sebesar $99,39%$ variasi $Y_t$ dapat dijelaskan oleh model. Uji Wald menunjukkan bahwa model secara keseluruhan signifikan dengan nilai-p $< 2,2 \times 10^{-16}$.
+
+Model Koyck yang terbentuk adalah
+
+$$
+\hat{Y}_t = 1,41668 + 0,84065Y_{t-1} + 0,09730X_t.
+$$
+
+Berdasarkan koefisien geometrik, diperoleh $\alpha=8,89017$, $\beta=0,09730$, dan $\phi=0,84065$. Nilai $\phi$ yang positif menunjukkan adanya pengaruh tertunda dari $X_t$ terhadap $Y_t$ yang berlangsung secara geometris dari waktu ke waktu.
+
+Hasil peramalan untuk delapan periode ke depan adalah $19,50932$, $19,76312$, $19,97648$, $20,18503$, $20,37007$, $20,58401$, $20,81251$, dan $21,06297$. Nilai MAPE sebesar $0,01554$ atau sekitar $1,55%$ menunjukkan bahwa tingkat kesalahan peramalan relatif rendah. Selain itu, nilai MASE sebesar $0,4738 < 1$ menunjukkan bahwa model Koyck memiliki kinerja peramalan yang lebih baik dibandingkan metode *naive*. Dengan demikian, model Koyck memiliki kemampuan peramalan yang baik.
+
+## Model 2: Distributed Lag Model (q = 2)
+
+```{r}
+model2.dlm <- dlm(x = train2$Xt, y = train2$Yt, q = 2)
+summary(model2.dlm)
+AIC(model2.dlm)
+BIC(model2.dlm)
+
+fore2.dlm <- forecast(model = model2.dlm, x = test2$Xt, h = nrow(test2))
+mape2.dlm <- MAPE(fore2.dlm$forecasts, test2$Yt)
+mape2.dlm
+GoF(model2.dlm)
+```
+Berdasarkan hasil estimasi model DLM dengan lag hingga 2 periode, diperoleh bahwa $X_t$, $X_{t-1}$, dan $X_{t-2}$ tidak berpengaruh signifikan terhadap $Y_t$, karena masing-masing memiliki nilai-p sebesar $0,493$, $0,260$, dan $0,593 > 0,05$. Sementara itu, intersep berpengaruh signifikan dengan nilai-p sebesar $7,37 \times 10^{-13} < 0,05$.
+
+Nilai $R^2$ sebesar $0,9791$ menunjukkan bahwa sebesar $97,91%$ variasi $Y_t$ dapat dijelaskan oleh model. Uji F menunjukkan bahwa model secara keseluruhan signifikan dengan nilai-p $< 2,2 \times 10^{-16}$.
+
+Model yang terbentuk adalah
+
+$$
+\hat{Y}_t = 5,3117 + 0,2014X_t + 0,4296X_{t-1} + 0,1523X_{t-2}.
+$$
+
+Model memiliki nilai AIC sebesar $23,3610$ dan BIC sebesar $30,3669$. Hasil peramalan menunjukkan nilai MAPE sebesar $0,01537$ atau sekitar $1,54%$, yang menunjukkan tingkat kesalahan peramalan relatif rendah. Nilai MASE sebesar $0,8855 < 1$ juga menunjukkan bahwa model memiliki kinerja peramalan yang lebih baik dibandingkan metode *naive*. Dengan demikian, model DLM dengan lag 2 memiliki kemampuan peramalan yang cukup baik.
+
+## Model 3: DLM dengan Lag Optimum
+
+```{r}
+qauto2 <- finiteDLMauto(formula = Yt ~ Xt, data = data.frame(train2),
+                        q.min = 1, q.max = 10,
+                        model.type = "dlm", error.type = "AIC", trace = TRUE)
+q.opt2 <- as.numeric(rownames(qauto2)[which.min(qauto2$AIC)])
+q.opt2
+
+model2.dlm2 <- dlm(x = train2$Xt, y = train2$Yt, q = q.opt2)
+summary(model2.dlm2)
+
+fore2.dlm2 <- forecast(model = model2.dlm2, x = test2$Xt, h = nrow(test2))
+mape2.dlm2 <- MAPE(fore2.dlm2$forecasts, test2$Yt)
+mape2.dlm2
+GoF(model2.dlm2)
+```
+Berdasarkan hasil estimasi model DLM dengan lag hingga 10 periode, seluruh peubah $X_t$ hingga $X_{t-10}$ tidak berpengaruh signifikan terhadap $Y_t$, karena seluruh nilai-p lebih besar dari $0,05$. Sementara itu, intersep berpengaruh signifikan dengan nilai-p sebesar $1,22 \times 10^{-5} < 0,05$.
+
+Nilai $R^2$ sebesar $0,9838$ menunjukkan bahwa sebesar $98,38%$ variasi $Y_t$ dapat dijelaskan oleh model. Uji F menunjukkan bahwa model secara keseluruhan signifikan dengan nilai-p sebesar $1,905 \times 10^{-7} < 0,05$.
+
+Model yang terbentuk adalah
+
+$$
+\begin{aligned}
+\hat{Y}_t ={}& 9,08973 + 0,07740X_t + 0,42488X_{t-1} - 0,03042X_{t-2} - 0,05505X_{t-3}\\
+&- 0,24718X_{t-4} + 0,24553X_{t-5} - 0,14879X_{t-6}\\
+&+ 0,13757X_{t-7} - 0,09399X_{t-8} - 0,08646X_{t-9} + 0,36644X_{t-10}.
+\end{aligned}
+$$
+
+Model memiliki nilai AIC sebesar $4,0314$ dan BIC sebesar $18,2149$. Hasil peramalan menunjukkan nilai MAPE sebesar $0,00709$ atau sekitar $0,71%$, yang menunjukkan tingkat kesalahan peramalan sangat rendah. Nilai MASE sebesar $0,5252 < 1$ juga menunjukkan bahwa model memiliki kinerja peramalan yang lebih baik dibandingkan metode *naive*. Dengan demikian, model DLM dengan lag 10 memiliki kemampuan peramalan yang sangat baik berdasarkan nilai MAPE.
+
+## Model 4: ARDL (p = 1, q = 1)
+
+```{r}
+model2.ardl <- ardlDlm(formula = Yt ~ Xt, data = train2, p = 1, q = 1)
+summary(model2.ardl)
+AIC(model2.ardl)
+BIC(model2.ardl)
+
+fore2.ardl <- forecast(model = model2.ardl, x = test2$Xt, h = nrow(test2))
+fore2.ardl
+mape2.ardl <- MAPE(fore2.ardl$forecasts, test2$Yt)
+mape2.ardl
+GoF(model2.ardl)
+```
+Model ARDL(1,1) menghasilkan persamaan:
+
+[
+\hat{Y}t = 1.30304 + 0.30844X_t - 0.20644X{t-1} + 0.83951Y_{t-1}
+]
+
+Variabel $Y_{t-1}$ berpengaruh positif dan signifikan terhadap $Y_t$ ($p<0.05$), sedangkan $X_t$ dan $X_{t-1}$ tidak signifikan pada taraf 5%. Model secara keseluruhan signifikan dengan $p<0.05$ dan memiliki $R^2=99.43%$.
+
+Hasil peramalan menghasilkan MAPE sebesar 1.91%, sehingga model memiliki tingkat kesalahan peramalan yang relatif rendah. Nilai MASE sebesar 0.4769 < 1 juga menunjukkan kinerja peramalan yang baik.
+
+## Penentuan Ordo Optimum ARDL
+
+```{r}
+model2.ardl.opt <- ardlBoundOrders(data = data.frame(data2[, c("Yt", "Xt")]),
+                                   ic = "AIC", formula = Yt ~ Xt)
+model2.ardl.opt$Stat.table
+model2.ardl.opt$min.Stat
+
+min_p2 <- c()
+for (i in seq_along(model2.ardl.opt$Stat.table)) {
+  min_p2[i] <- suppressWarnings(min(model2.ardl.opt$Stat.table[[i]], na.rm = TRUE))
+}
+q_opt2 <- which(min_p2 == min(min_p2, na.rm = TRUE))[1]
+p_opt2 <- which(model2.ardl.opt$Stat.table[[q_opt2]] ==
+                  min(model2.ardl.opt$Stat.table[[q_opt2]], na.rm = TRUE))[1]
+data.frame("p_optimum" = p_opt2, "q_optimum" = q_opt2,
+           "AIC" = model2.ardl.opt$min.Stat)
+```
+
+## Model 5: ARDL dengan Ordo Optimum
+
+```{r}
+model2.ardl.op <- ardlDlm(formula = Yt ~ Xt, data = train2,
+                          p = p_opt2, q = q_opt2)
+summary(model2.ardl.op)
+AIC(model2.ardl.op)
+BIC(model2.ardl.op)
+
+fore2.ardl.op <- forecast(model = model2.ardl.op, x = test2$Xt, h = nrow(test2))
+mape2.ardl.op <- MAPE(fore2.ardl.op$forecasts, test2$Yt)
+mape2.ardl.op
+GoF(model2.ardl.op)
+```
+Hasil estimasi ARDL optimal menunjukkan bahwa model **tidak dapat diestimasi dengan baik** karena tidak memiliki derajat bebas residual. Seluruh 17 residual bernilai 0 dan diperoleh $R^2=1$, tetapi adjusted $R^2$, uji $t$, uji $F$, serta nilai standard error tidak dapat dihitung. Hal ini terjadi karena jumlah lag yang digunakan terlalu banyak sehingga model mengalami **overparameterisasi/singularitas**. Oleh karena itu, model ARDL optimal ini **tidak dapat digunakan untuk interpretasi maupun peramalan**.
+
+Nilai MAPE dan MASE yang bernilai 0 juga tidak dapat dianggap menunjukkan model sempurna karena model mengalami *perfect fit* akibat tidak adanya derajat bebas residual.
+
+## Pemodelan dengan `dynlm` dan Uji Asumsi
+
+```{r}
+c2_lm1 <- dynlm(Yt ~ Xt + L(Xt), data = train2.ts)
+c2_lm2 <- dynlm(Yt ~ Xt + L(Yt), data = train2.ts)
+c2_lm3 <- dynlm(Yt ~ Xt + L(Xt) + L(Yt), data = train2.ts)
+c2_lm4 <- dynlm(Yt ~ Xt + L(Xt) + L(Xt, 2), data = train2.ts)
+
+summary(c2_lm1)
+summary(c2_lm2)
+summary(c2_lm3)
+summary(c2_lm4)
+```
+Model 1: $Y_t \sim X_t + X_{t-1}$
+Model signifikan secara simultan ($p<0.05$) dengan $R^2=97.95%$. Namun, $X_t$ ($p=0.281$) dan $X_{t-1}$ ($p=0.104$) tidak berpengaruh signifikan secara parsial terhadap $Y_t$.
+
+Model 2: $Y_t \sim X_t + Y_{t-1}$
+Model signifikan secara simultan ($p<0.05$) dengan $R^2=99.40%$. Variabel $Y_{t-1}$ berpengaruh positif dan signifikan terhadap $Y_t$ ($p<0.05$), sedangkan $X_t$ tidak signifikan pada taraf 5%.
+
+Model 3: $Y_t \sim X_t + X_{t-1} + Y_{t-1}$
+Model signifikan secara simultan ($p<0.05$) dengan $R^2=99.43%$. Variabel $Y_{t-1}$ berpengaruh positif dan signifikan, sedangkan $X_t$ dan $X_{t-1}$ tidak signifikan pada taraf 5%.
+
+Model 4: $Y_t \sim X_t + X_{t-1} + X_{t-2}$
+Model signifikan secara simultan ($p<0.05$) dengan $R^2=97.91%$. Ketiga variabel $X_t$, $X_{t-1}$, dan $X_{t-2}$ tidak signifikan secara parsial.
+
+Berdasarkan adjusted $R^2$, Model 3 merupakan model terbaik karena memiliki nilai tertinggi, yaitu 99.37%.
+
+### SSE
+
+```{r}
+data.frame(
+  Model = c("c2_lm1", "c2_lm2", "c2_lm3", "c2_lm4"),
+  SSE = c(deviance(c2_lm1), deviance(c2_lm2),
+          deviance(c2_lm3), deviance(c2_lm4))
+)
+```
+Berdasarkan nilai SSE, model **c2_lm3** memiliki nilai SSE paling kecil yaitu **0.8661**, sehingga model tersebut dipilih sebagai model terbaik karena menghasilkan kesalahan prediksi paling rendah dibandingkan model lainnya.
+
+### Uji Encompassing
+
+```{r}
+encomptest(c2_lm1, c2_lm2)
+```
+Berdasarkan hasil **encompassing test**, pada perbandingan Model 1 dengan Model E diperoleh $p$-value sebesar **5.199 × 10⁻⁹ < 0.05**, sehingga Model 1 tidak mampu menjelaskan data sebaik Model E. Sementara itu, pada perbandingan Model 2 dengan Model E diperoleh $p$-value sebesar **0.2453 > 0.05**, sehingga tidak terdapat bukti bahwa Model E lebih baik daripada Model 2. Dengan demikian, **Model 2 dipilih sebagai model yang lebih sederhana dan memadai**.
+
+### Uji Autokorelasi, Heteroskedastisitas, dan Normalitas
+
+```{r}
+# Autokorelasi
+dwtest(c2_lm1); dwtest(c2_lm2); dwtest(c2_lm3); dwtest(c2_lm4)
+
+# Heteroskedastisitas
+bptest(c2_lm1); bptest(c2_lm2); bptest(c2_lm3); bptest(c2_lm4)
+
+# Normalitas sisaan
+shapiro.test(residuals(c2_lm1)); shapiro.test(residuals(c2_lm2))
+shapiro.test(residuals(c2_lm3)); shapiro.test(residuals(c2_lm4))
+```
+Berdasarkan uji Durbin-Watson, Model 1 dan Model 4 mengalami autokorelasi positif karena memiliki $p$-value < 0.05. Sementara itu, Model 2 dan Model 3 tidak mengalami autokorelasi karena $p$-value > 0.05.
+
+Berdasarkan uji Breusch-Pagan, seluruh model memiliki $p$-value > 0.05, sehingga tidak terdapat indikasi heteroskedastisitas pada residual.
+
+Berdasarkan uji Shapiro-Wilk, seluruh model memiliki $p$-value > 0.05, sehingga residual dapat dianggap berdistribusi normal.
+
+Dengan demikian, Model 3 merupakan model yang memenuhi seluruh asumsi klasik, yaitu tidak mengalami autokorelasi, heteroskedastisitas, maupun pelanggaran normalitas residual.
+
+## Perbandingan Model
+
+```{r}
+akurasi2 <- matrix(c(mape2.koyck, mape2.dlm, mape2.dlm2,
+                     mape2.ardl, mape2.ardl.op))
+row.names(akurasi2) <- c("Koyck", "DLM q=2", paste0("DLM q=", q.opt2),
+                         "ARDL (1,1)",
+                         paste0("ARDL optimum (p=", p_opt2, ", q=", q_opt2, ")"))
+colnames(akurasi2) <- c("MAPE")
+akurasi2
+
+best2 <- row.names(akurasi2)[which.min(akurasi2[, 1])]
+best2
+```
+Berdasarkan nilai MAPE, model **Koyck** memiliki MAPE paling kecil yaitu **0.01554 atau 1.55%**, sehingga dipilih sebagai **model terbaik untuk peramalan**. Selanjutnya, DLM q=10 memiliki MAPE 2.02%, ARDL(1,1) sebesar 1.91%, dan DLM q=2 sebesar 5.44%. Model ARDL optimum tidak dapat dibandingkan karena menghasilkan nilai MAPE **NA**.
+
+## Plot Perbandingan Peramalan
+
+```{r fig.width=9, fig.height=5}
+ramalan2 <- list(
+  Koyck   = as.numeric(fore2.koyck$forecasts),
+  DLM2    = as.numeric(fore2.dlm$forecasts),
+  DLMopt  = as.numeric(fore2.dlm2$forecasts),
+  ARDL11  = as.numeric(fore2.ardl$forecasts),
+  ARDLopt = as.numeric(fore2.ardl.op$forecasts)
+)
+
+sapply(ramalan2, function(z) sum(!is.finite(z)))
+
+rng2 <- range(c(test2$Yt, unlist(ramalan2)), na.rm = TRUE, finite = TRUE)
+
+warna  <- c(Koyck = "red", DLM2 = "blue", DLMopt = "orange",
+            ARDL11 = "green3", ARDLopt = "purple")
+label2 <- c(Koyck = "Koyck", DLM2 = "DLM q=2",
+            DLMopt = paste0("DLM q=", q.opt2),
+            ARDL11 = "ARDL (1,1)",
+            ARDLopt = paste0("ARDL optimum (p=", p_opt2, ", q=", q_opt2, ")"))
+
+plot(test2$Year, test2$Yt, type = "b", pch = 16, col = "black", ylim = rng2,
+     xlab = "Tahun", ylab = "Sales (Y)",
+     main = "Perbandingan Hasil Peramalan - Latihan 2")
+
+valid <- names(ramalan2)[sapply(ramalan2, function(z)
+  length(z) == nrow(test2) && all(is.finite(z)))]
+
+for (m in valid) {
+  lines(test2$Year, ramalan2[[m]], col = warna[m])
+  points(test2$Year, ramalan2[[m]], col = warna[m], pch = 1)
+}
+
+legend("topleft",
+       legend = c("Aktual", label2[valid]),
+       lty = 1, pch = c(16, rep(1, length(valid))),
+       col = c("black", warna[valid]),
+       cex = 0.75, bty = "n")
+```
+## Kesimpulan
+Penjualan dan belanja iklan sama-sama menunjukkan tren naik selama 1975--2014 dengan korelasi yang sangat tinggi. Ordo optimum ARDL ditentukan melalui `ardlBoundOrders()` dengan kriteria AIC, kemudian dibandingkan dengan Koadalah model Koyck.
