@@ -1,1 +1,374 @@
+---
+title: "Tugas Praktikum 4"
+author: "Yoan Puti Nazera"
+date: "2026-09-24"
+output: rmdformats::readthedown
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.align = "center", fig.width = 8, fig.height = 4.5)
+```
 
+```{r}
+library(TSA)
+```
+
+# Proses MA(2)
+## Pembangkitan MA(2) secara manual
+```{r}
+set.seed(123)
+
+n <- 300
+theta1 <- 0.4
+theta2 <- 0.6
+
+e <- rnorm(n)
+
+Y_MA2_manual <- numeric(n)
+
+Y_MA2_manual[1] <- e[1]
+Y_MA2_manual[2] <- e[2] + theta1 * e[1]
+
+for (t in 3:n) {
+  Y_MA2_manual[t] <- e[t] +
+    theta1 * e[t-1] +
+    theta2 * e[t-2]
+}
+
+Y_MA2_manual
+```
+## Pembangkitan MA(2) dengan arima.sim
+```{r}
+set.seed(123)
+
+Y_MA2 <- arima.sim(
+  n = 300,
+  model = list(ma = c(0.4, 0.6))
+)
+
+Y_MA2
+```
+
+## Plot Time Series
+```{r}
+ts.plot(
+  Y_MA2,
+  main = "Time Series MA(2)",
+  ylab = "Yt",
+  xlab = "Waktu"
+)
+```
+## Plot ACF
+```{r}
+acf(
+  Y_MA2,
+  main = "ACF MA(2)"
+)
+```
+## Plot PACF
+```{r}
+pacf(
+  Y_MA2,
+  main = "PACF MA(2)"
+)
+```
+## Plot EACF
+```{r}
+eacf(Y_MA2)
+```
+
+# Proses AR(2)
+
+## Pembangkitan AR(2) secara manual
+```{r}
+set.seed(123)
+
+n <- 300
+phi1 <- 0.5
+phi2 <- 0.2
+
+e <- rnorm(n)
+
+Y_AR2_manual <- numeric(n)
+
+Y_AR2_manual[1] <- e[1]
+Y_AR2_manual[2] <- phi1 * Y_AR2_manual[1] + e[2]
+
+for (t in 3:n) {
+  Y_AR2_manual[t] <- phi1 * Y_AR2_manual[t-1] +
+    phi2 * Y_AR2_manual[t-2] +
+    e[t]
+}
+
+Y_AR2_manual
+```
+## Pembangkitan AR(2) dengan arima.sim
+```{r}
+set.seed(123)
+
+Y_AR2 <- arima.sim(
+  n = 300,
+  model = list(ar = c(0.5, 0.2))
+)
+
+Y_AR2
+```
+
+## Plot Time Series
+```{r}
+ts.plot(
+  Y_AR2,
+  main = "Time Series AR(2)",
+  ylab = "Yt",
+  xlab = "Waktu"
+)
+```
+
+## Plot ACF
+```{r}
+acf(
+  Y_AR2,
+  main = "ACF AR(2)"
+)
+```
+
+## Plot PACF
+```{r}
+pacf(
+  Y_AR2,
+  main = "PACF AR(2)"
+)
+```
+
+## Plot EACF
+```{r}
+eacf(Y_AR2)
+```
+
+## Uji Stasioneritas
+```{r}
+phi1 <- 0.5
+phi2 <- 0.2
+
+akar_AR2 <- polyroot(
+  c(1, -phi1, -phi2)
+)
+
+akar_AR2
+Mod(akar_AR2)
+```
+
+## Scatterplot Yt terhadap Yt-1
+```{r}
+plot(
+  Y_AR2[-1],
+  Y_AR2[-length(Y_AR2)],
+  main = expression(Y[t] ~ "vs" ~ Y[t-1]),
+  xlab = expression(Y[t-1]),
+  ylab = expression(Y[t])
+)
+```
+
+## Scatterplot Yt terhadap Yt-2
+```{r}
+plot(
+  Y_AR2[-c(1,2)],
+  Y_AR2[-c(299,300)],
+  main = expression(Y[t] ~ "vs" ~ Y[t-2]),
+  xlab = expression(Y[t-2]),
+  ylab = expression(Y[t])
+)
+```
+
+## Scatterplot Yt terhadap Yt-3
+```{r}
+plot(
+  Y_AR2[-c(1,2,3)],
+  Y_AR2[-c(298,299,300)],
+  main = expression(Y[t] ~ "vs" ~ Y[t-3]),
+  xlab = expression(Y[t-3]),
+  ylab = expression(Y[t])
+)
+```
+
+## Autokorelasi Empiris
+```{r}
+acf_AR2 <- acf(
+  Y_AR2,
+  lag.max = 3,
+  plot = FALSE
+)
+
+acf_AR2$acf
+```
+
+## Autokorelasi Teoritis
+```{r}
+rho1 <- phi1 / (1 - phi2)
+rho2 <- phi1 * rho1 + phi2
+rho3 <- phi1 * rho2 + phi2 * rho1
+
+rho_teoritis_AR2 <- c(
+  rho1 = rho1,
+  rho2 = rho2,
+  rho3 = rho3
+)
+
+rho_teoritis_AR2
+```
+
+# Proses ARMA(2,2)
+## Pembangkitan ARMA(2,2) secara manual
+```{r}
+set.seed(123)
+
+n <- 300
+
+phi1 <- 0.5
+phi2 <- 0.2
+
+theta1 <- 0.4
+theta2 <- 0.6
+
+e <- rnorm(n)
+
+Y_ARMA22_manual <- numeric(n)
+
+Y_ARMA22_manual[1] <- e[1]
+
+Y_ARMA22_manual[2] <-
+  phi1 * Y_ARMA22_manual[1] +
+  e[2] +
+  theta1 * e[1]
+
+for (t in 3:n) {
+  Y_ARMA22_manual[t] <-
+    phi1 * Y_ARMA22_manual[t-1] +
+    phi2 * Y_ARMA22_manual[t-2] +
+    e[t] +
+    theta1 * e[t-1] +
+    theta2 * e[t-2]
+}
+
+Y_ARMA22_manual
+```
+
+## Pembangkitan ARMA(2,2) dengan arima.sim
+```{r}
+set.seed(123)
+
+Y_ARMA22 <- arima.sim(
+  n = 300,
+  model = list(
+    ar = c(0.5, 0.2),
+    ma = c(0.4, 0.6)
+  )
+)
+
+Y_ARMA22
+```
+
+## Plot Time Series
+```{r}
+ts.plot(
+  Y_ARMA22,
+  main = "Time Series ARMA(2,2)",
+  ylab = "Yt",
+  xlab = "Waktu"
+)
+```
+
+## Plot ACF
+```{r}
+acf(
+  Y_ARMA22,
+  main = "ACF ARMA(2,2)"
+)
+```
+
+## Plot PACF
+```{r}
+pacf(
+  Y_ARMA22,
+  main = "PACF ARMA(2,2)"
+)
+```
+
+## Plot EACF
+```{r}
+eacf(Y_ARMA22)
+```
+
+## Uji Stasioneritas
+```{r}
+phi1 <- 0.5
+phi2 <- 0.2
+
+akar_ARMA22 <- polyroot(
+  c(1, -phi1, -phi2)
+)
+
+akar_ARMA22
+Mod(akar_ARMA22)
+```
+
+## Scatterplot Yt terhadap Yt-1
+```{r}
+plot(
+  Y_ARMA22[-1],
+  Y_ARMA22[-length(Y_ARMA22)],
+  main = expression(Y[t] ~ "vs" ~ Y[t-1]),
+  xlab = expression(Y[t-1]),
+  ylab = expression(Y[t])
+)
+```
+
+## Scatterplot Yt terhadap Yt-2
+```{r}
+plot(
+  Y_ARMA22[-c(1,2)],
+  Y_ARMA22[-c(299,300)],
+  main = expression(Y[t] ~ "vs" ~ Y[t-2]),
+  xlab = expression(Y[t-2]),
+  ylab = expression(Y[t])
+)
+```
+
+## Scatterplot Yt terhadap Yt-3
+```{r}
+plot(
+  Y_ARMA22[-c(1,2,3)],
+  Y_ARMA22[-c(298,299,300)],
+  main = expression(Y[t] ~ "vs" ~ Y[t-3]),
+  xlab = expression(Y[t-3]),
+  ylab = expression(Y[t])
+)
+```
+
+## Autokorelasi Empiris
+```{r}
+acf_ARMA22 <- acf(
+  Y_ARMA22,
+  lag.max = 3,
+  plot = FALSE
+)
+
+acf_ARMA22$acf
+```
+
+## Autokorelasi Teoritis
+```{r}
+acf_teoritis_ARMA22 <- ARMAacf(
+  ar = c(0.5, 0.2),
+  ma = c(0.4, 0.6),
+  lag.max = 3
+)
+
+acf_teoritis_ARMA22
+```
+
+# Kesimpulan
+Berdasarkan hasil pembangkitan dan analisis data, proses MA(2), AR(2), dan ARMA(2,2) dapat dibangkitkan secara manual maupun menggunakan fungsi arima.sim(). Ketiga proses menunjukkan karakteristik autokorelasi yang sesuai dengan modelnya. Pada MA(2), autokorelasi teoritis bernilai nol setelah lag ke-2, sedangkan pada AR(2) autokorelasi menurun secara bertahap mengikuti pola autoregresif. Sementara itu, ARMA(2,2) menunjukkan karakteristik gabungan dari komponen AR dan MA. Hasil autokorelasi empiris dari data bangkitan secara umum mendekati autokorelasi teoritis masing-masing model.
